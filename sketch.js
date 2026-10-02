@@ -1,9 +1,20 @@
 function setup() {
-  createCanvas(400, 400);
+  createCanvas(windowWidth, windowHeight);
+  lockGestures();
+  showDesktopQr({ label: 'Scan to open on your phone' });
+  requestWakeLock();
 }
 
 function draw() {
-  background(255, 0, 0);
-  fill(255, 165, 0);
-  rect(140, 140, 120, 120);
+  background(210);
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+}
+
+function requestWakeLock() {
+  if ('wakeLock' in navigator) {
+    navigator.wakeLock.request('screen').catch(() => {});
+  }
 }

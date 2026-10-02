@@ -117,3 +117,11 @@ you double tap to add a heart to the screen, after 2 seconds the heart turns int
 ---
 
 ## Changes
+
+### Step 1: Canvas Setup, Gesture Locking, and Screen Wake Lock
+- `sketch.js` rebuilt for a full-window responsive canvas.
+- `setup()` calls `createCanvas(windowWidth, windowHeight)`, `lockGestures()` to block pull-to-refresh and pinch-zoom, `showDesktopQr()` for the desktop QR corner code, and `requestWakeLock()`.
+- Added `windowResized()` calling `resizeCanvas(windowWidth, windowHeight)` so the canvas follows rotation and browser chrome changes.
+- Added `requestWakeLock()` helper requesting `navigator.wakeLock.request('screen')`, guarded by `'wakeLock' in navigator` with a swallowed `.catch` for unsupported/denied cases.
+- `draw()` keeps the current flat background for now; the Step 2 grid replaces it.
+- No tunable numbers introduced at this step, per plan.
