@@ -125,3 +125,13 @@ you double tap to add a heart to the screen, after 2 seconds the heart turns int
 - Added `requestWakeLock()` helper requesting `navigator.wakeLock.request('screen')`, guarded by `'wakeLock' in navigator` with a swallowed `.catch` for unsupported/denied cases.
 - `draw()` keeps the current flat background for now; the Step 2 grid replaces it.
 - No tunable numbers introduced at this step, per plan.
+
+### Step 2: Background Grid Rendering
+- Added tunable constants at the top of `sketch.js`: `GRID_SIZE = 36`, `GRID_LINE_COLOR = 232`, `GRID_LINE_WEIGHT = 1`.
+- Added `drawGrid()`, called from `draw()`: `background(255)` then `stroke`/`strokeWeight` loops drawing vertical and horizontal lines across the current `width` and `height`.
+- Because the grid reads `width` and `height` every frame, it recalculates itself on resize/rotation with no extra code beyond Step 1's `windowResized()`.
+
+### Step 3: Sensor Activation Overlay & Tilt Detection Test
+- Added tunable constant `SENSOR_PROMPT_TEXT = 'Tap to enable motion sensors'`.
+- `setup()` now calls `enableSensorTap(SENSOR_PROMPT_TEXT)` after `lockGestures()`, so the permission request happens from a real user tap (required by iOS transient activation).
+- `draw()` reads motion only behind `if (window.sensorsEnabled) return;` — before the tap the prompt overlay is the only thing on screen; after it, live `rotationX`, `rotationY`, `rotationZ` values are drawn in the top-left using `nf(rotationX, 2, 1)` for fixed one-decimal formatting.
