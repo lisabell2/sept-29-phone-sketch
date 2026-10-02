@@ -3,15 +3,16 @@ const GRID_SIZE = 36;
 const GRID_LINE_COLOR = 232;
 const GRID_LINE_WEIGHT = 1;
 const SENSOR_PROMPT_TEXT = 'Tap to enable motion sensors';
-const SPRITE_SIZE_RATIO = 0.14;
+const SPRITE_SIZE_RATIO = 0.22;
 const DOUBLE_TAP_MAX_DELAY = 300;
 const DOUBLE_TAP_MAX_DISTANCE = 25;
 const MAX_ENTITIES = 100;
-const GRAVITY_FORCE = 0.35;
-const FRICTION_DAMPING = 0.98;
-const RESTITUTION = 0.75;
+const GRAVITY_FORCE = 1.1;
+const FRICTION_DAMPING = 0.995;
+const RESTITUTION = 0.85;
 const TRANSFORM_DELAY_MS = 2000;
-const COLLISION_RESTITUTION = 0.85;
+const COLLISION_RESTITUTION = 0.9;
+const MAX_SPEED = 14;
 
 let characterImg;
 let heartImg;
@@ -95,6 +96,13 @@ function updateEntities() {
   for (const e of entities) {
     e.vx = (e.vx + tilt.x * GRAVITY_FORCE) * FRICTION_DAMPING;
     e.vy = (e.vy + tilt.y * GRAVITY_FORCE) * FRICTION_DAMPING;
+
+    const speed = dist(0, 0, e.vx, e.vy);
+    if (speed > MAX_SPEED) {
+      e.vx = (e.vx / speed) * MAX_SPEED;
+      e.vy = (e.vy / speed) * MAX_SPEED;
+    }
+
     e.x += e.vx;
     e.y += e.vy;
     bounceWithinScreen(e);

@@ -185,6 +185,14 @@ you double tap to add a heart to the screen, after 2 seconds the heart turns int
 
 ## Final State Notes
 - All eight steps are implemented. Bumping behaviour comes entirely from the constants block at the top of `sketch.js`; nothing below `setup()` needs editing for tuning.
-- `index.html` references `sketch.js?v=3`. This query string must be incremented on every deploy, because GitHub Pages serves `Cache-Control: max-age=600` and mobile browsers will otherwise run a stale sketch for up to 10 minutes.
+- `index.html` references `sketch.js?v=4`. This query string must be incremented on every deploy, because GitHub Pages serves `Cache-Control: max-age=600` and mobile browsers will otherwise run a stale sketch for up to 10 minutes.
+
+### Tuning Pass: Larger, Faster Movement
+- `SPRITE_SIZE_RATIO` raised `0.14` → `0.22` (14% → 22% of canvas width per sprite).
+- `GRAVITY_FORCE` raised `0.35` → `1.1` for a much stronger pull from tilt.
+- `FRICTION_DAMPING` raised `0.98` → `0.995` so velocity decays far more slowly and sprites keep gliding between bounces. Note this is a per-frame multiplier: `0.995` retains ~74% of speed after 100 frames versus ~18% at `0.98`.
+- `RESTITUTION` `0.75` → `0.85` and `COLLISION_RESTITUTION` `0.85` → `0.9` so bounces stay lively at the higher speed.
+- Added `MAX_SPEED = 14` as a new tunable, enforced in `updateEntities()` by normalizing velocity with `dist()` when exceeded. Without a cap, the reduced damping lets a sprite accumulate enough speed in one frame to skip past another sprite's collision radius entirely (tunneling), which shows up as sprites passing through each other. 14px/frame stays well under the 22%-of-width sprite diameter.
+- Sprite size is captured at spawn time from `width * SPRITE_SIZE_RATIO`, so the larger ratio takes effect for newly spawned entities; existing ones keep the size they were born with until refresh.
 - Hardware sensors stay behind `window.sensorsEnabled`. On desktop the values read 0, so sprites settle and collide under gravity alone — real sliding requires the phone.
 - Assets live in `references/` (copied out of the skills folder): `character1.png`, `character2.png`, `layout.design.jpg`. Procedural fallbacks cover either PNG failing to load.
