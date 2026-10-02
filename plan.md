@@ -194,5 +194,22 @@ you double tap to add a heart to the screen, after 2 seconds the heart turns int
 - `RESTITUTION` `0.75` → `0.85` and `COLLISION_RESTITUTION` `0.85` → `0.9` so bounces stay lively at the higher speed.
 - Added `MAX_SPEED = 14` as a new tunable, enforced in `updateEntities()` by normalizing velocity with `dist()` when exceeded. Without a cap, the reduced damping lets a sprite accumulate enough speed in one frame to skip past another sprite's collision radius entirely (tunneling), which shows up as sprites passing through each other. 14px/frame stays well under the 22%-of-width sprite diameter.
 - Sprite size is captured at spawn time from `width * SPRITE_SIZE_RATIO`, so the larger ratio takes effect for newly spawned entities; existing ones keep the size they were born with until refresh.
+
+### Tuning Pass 2: Large Sprites, Strong Gravity, Aggressive Bounces
+- `SPRITE_SIZE_RATIO` `0.22` → **`0.34`** — roughly a third of screen width per sprite.
+- `GRAVITY_FORCE` `1.1` → **`2.4`**, more than doubling the acceleration from tilt.
+- `FRICTION_DAMPING` `0.995` → **`0.998`** — retains ~97% of speed per 100 frames, so sprites accelerate hard instead of coasting to a stop.
+- `RESTITUTION` `0.85` → **`0.92`** and `COLLISION_RESTITUTION` `0.9` → **`0.95`** for livelier bounces off edges and off each other.
+- `MAX_SPEED` `14` → **`22`**, raised to stay safely under the new 34%-of-width sprite diameter and avoid tunneling.
+
+#### Falling straight down when tilted
+- New tunable `TILT_RANGE = 25`, replacing the hardcoded `/ 45` divisor in `readTilt()`. A phone held upright sits near `rotationX ≈ 0`, so a smaller range means useful force arrives at a much shallower angle. 25° reaches full force.
+- New tunable `TILT_CURVE = 1.7`, applied in the new `curveTilt()` helper: `Math.sign(n) * Math.pow(Math.abs(n), TILT_CURVE)` on the normalized value. The exponent above 1 makes the response nonlinear — gentle near level so sprites settle instead of buzzing, then steep near the limit so past ~15° they pull hard toward the low edge.
+- New tunable `VERTICAL_GRAVITY_MULT = 1.6`, applied only to the `tilt.y` term in `updateEntities()`. Front/back tilt produces a stronger pull than left/right tilt, which is what makes the sprites visibly drop rather than slide when the phone is tipped up or down.
+- Entity readout now shows `entities: N / 100` so the cap is easier to confirm at the larger sprite size.
+
+#### Notes for further tuning
+- `TILT_CURVE` below 1 would invert the behaviour (more sensitive when nearly level, weaker when steep). Raise it for a more dramatic drop-off; lower it toward 1 for linear feel.
+- If sprites pass through each other when moving fast, reduce `MAX_SPEED` — or raise `SPRITE_SIZE_RATIO`, since collision radius scales with sprite size.
 - Hardware sensors stay behind `window.sensorsEnabled`. On desktop the values read 0, so sprites settle and collide under gravity alone — real sliding requires the phone.
 - Assets live in `references/` (copied out of the skills folder): `character1.png`, `character2.png`, `layout.design.jpg`. Procedural fallbacks cover either PNG failing to load.
