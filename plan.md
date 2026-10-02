@@ -151,3 +151,21 @@ you double tap to add a heart to the screen, after 2 seconds the heart turns int
 - `lastTapTime` is reset to `0` after a successful pair so a third tap cannot chain into a false triple-tap match.
 - `drawDebugMarker()` flashes a green 24px circle for 500ms at the detected point and logs coordinates, so the gesture is verifiable before spawning exists.
 - `mousePressed()` returns `false` to leave touch handling to p5-phone's gesture lock.
+
+### Step 6: Entity Spawning, Tilt Gravity, and Screen Boundary Bounce
+- Added tunables `MAX_ENTITIES = 100`, `GRAVITY_FORCE = 0.35`, `FRICTION_DAMPING = 0.98`, `RESTITUTION = 0.75`.
+- Added module-level `entities = []`. Each entity is a plain object with `x`, `y`, `vx`, `vy`, `size`, `isHeart`, `born`.
+- `spawnEntity(x, y)` pushes a heart at the tap point and silently returns if `entities.length >= MAX_ENTITIES`, so the cap needs no external reset.
+- `mousePressed()` now calls `spawnEntity(mouseX, mouseY)` on a confirmed double tap, replacing Step 5's log-only behaviour. The debug marker is kept.
+- `updateEntities()` runs each frame: adds tilt-derived acceleration, damps velocity by `FRICTION_DAMPING`, integrates position, then calls `bounceWithinScreen()`.
+- `readTilt()` gates on `window.sensorsEnabled` and returns `{ x: 0, y: 0 }` when sensors are off, then normalizes `rotationY` (left/right tilt drives `x`) and `rotationX` (front/back tilt drives `y`) through `constrain(v / 45, -1, 1)` so the force stays bounded at ±1.
+- `bounceWithinScreen()` clamps each sprite to stay fully inside the canvas using half its size, and flips the velocity sign with `Math.abs()` * `RESTITUTION` so restitution never flips an entity outward. All four edges handled symmetrically.
+- `drawEntities()` renders every entity centered with `image(img, e.x, e.y, e.size, e.size)`, falling back to the procedural heart/circle shapes. The Step 4 static preview pair was removed since sprites are now real entities.
+- `size` is captured at spawn time from `width * SPRITE_SIZE_RATIO`; on rotation, `windowResized()` resizes the canvas and positions clamp against the new bounds.
+- Entity count is drawn in the tilt readout so the 100 cap is visible while testing.
+
+### Step 7: Timed Transformation from Heart to Character
+- Added tunable `TRANSFORM_DELAY_MS = 2000`.
+- Each entity stores `born: millis()` at spawn, and `updateEntities()` flips `e.isHeart = false` once `millis() - e.born >= TRANSFORM_DELAY_MS`.
+- Only the `isHeart` flag changes, so position and velocity are untouched across the swap — the sprite keeps its exact path with no sound or visual effect, as specified.
+- `drawEntities()` reads `isHeart` each frame to pick `heartImg`/`character2` art or `characterImg`/`character1` art, so the swap is automatic and needs no separate transform branch.

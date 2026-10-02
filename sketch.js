@@ -6,10 +6,16 @@ const SENSOR_PROMPT_TEXT = 'Tap to enable motion sensors';
 const SPRITE_SIZE_RATIO = 0.14;
 const DOUBLE_TAP_MAX_DELAY = 300;
 const DOUBLE_TAP_MAX_DISTANCE = 25;
+const MAX_ENTITIES = 100;
+const GRAVITY_FORCE = 0.35;
+const FRICTION_DAMPING = 0.98;
+const RESTITUTION = 0.75;
+const TRANSFORM_DELAY_MS = 2000;
 
 let characterImg;
 let heartImg;
 
+let entities = [];
 let lastTapTime = 0;
 let lastTapX = 0;
 let lastTapY = 0;
@@ -40,7 +46,8 @@ async function loadAssets() {
 
 function draw() {
   drawGrid();
-  drawAssetPreview();
+  updateEntities();
+  drawEntities();
   drawDebugMarker();
 
   if (!window.sensorsEnabled) return;
@@ -49,9 +56,10 @@ function draw() {
   fill(0);
   textAlign(LEFT, TOP);
   textSize(14);
-  text('rotationX: ' + nf(rotationX, 2, 1), 12, 12);
-  text('rotationY: ' + nf(rotationY, 2, 1), 12, 30);
-  text('rotationZ: ' + nf(rotationZ, 2, 1), 12, 48);
+  text('entities: ' + entities.length, 12, 12);
+  text('rotationX: ' + nf(rotationX, 2, 1), 12, 30);
+  text('rotationY: ' + nf(rotationY, 2, 1), 12, 48);
+  text('rotationZ: ' + nf(rotationZ, 2, 1), 12, 66);
 }
 
 function drawGrid() {
@@ -66,17 +74,78 @@ function drawGrid() {
   }
 }
 
-function drawAssetPreview() {
-  const size = width * SPRITE_SIZE_RATIO;
-  if (heartImg) {
-    image(heartImg, width * 0.35, height * 0.5, size, size);
-  } else {
-    drawFallbackHeart(width * 0.35, height * 0.5, size);
+function spawnEntity(x, y) {
+  if (entities.length >= MAX_ENTITIES) return;
+
+  entities.push({
+    x: x,
+    y: y,
+    vx: 0,
+    vy: 0,
+    size: width * SPRITE_SIZE_RATIO,
+    isHeart: true,
+    born: millis(),
+  });
+}
+
+function updateEntities() {
+  const tilt = readTilt();
+
+  for (const e of entities) {
+    e.vx = (e.vx + tilt.x * GRAVITY_FORCE) * FRICTION_DAMPING;
+    e.vy = (e.vy + tilt.y * GRAVITY_FORCE) * FRICTION_DAMPING;
+    e.x += e.vx;
+    e.y += e.vy;
+    bounceWithinScreen(e);
+    if (e.isHeart && millis() - e.born >= TRANSFORM_DELAY_MS) {
+      e.isHeart = false;
+    }
   }
-  if (characterImg) {
-    image(characterImg, width * 0.65, height * 0.5, size, size);
-  } else {
-    fallbackCircle(width * 0.65, height * 0.5, size);
+}
+
+function readTilt() {
+  if (!window.sensorsEnabled) return { x: 0, y: 0 };
+  return {
+    x: constrain(rotationY / 45, -1, 1),
+    y: constrain(rotationX / 45, -1, 1),
+  };
+}
+
+function bounceWithinScreen(e) {
+  const half = e.size / 2;
+
+  if (e.x < half) {
+    e.x = half;
+    e.vx = Math.abs(e.vx) * RESTITUTION;
+  } else if (e.x > width - half) {
+    e.x = width - half;
+    e.vx = -Math.abs(e.vx) * RESTITUTION;
+  }
+
+  if (e.y < half) {
+    e.y = half;
+    e.vy = Math.abs(e.vy) * RESTITUTION;
+  } else if (e.y > height - half) {
+    e.y = height - half;
+    e.vy = -Math.abs(e.vy) * RESTITUTION;
+  }
+}
+
+function drawEntities() {
+  for (const e of entities) {
+    if (e.isHeart) {
+      if (heartImg) {
+        image(heartImg, e.x, e.y, e.size, e.size);
+      } else {
+        drawFallbackHeart(e.x, e.y, e.size);
+      }
+    } else {
+      if (characterImg) {
+        image(characterImg, e.x, e.y, e.size, e.size);
+      } else {
+        fallbackCircle(e.x, e.y, e.size);
+      }
+    }
   }
 }
 
@@ -103,7 +172,7 @@ function mousePressed() {
   if (lastTapTime !== 0 && withinTime && withinSpace) {
     lastTapTime = 0;
     debugMarker = { x: mouseX, y: mouseY, born: now };
-    console.log('double tap at', mouseX, mouseY);
+    spawnEntity(mouseX, mouseY);
   } else {
     lastTapTime = now;
     lastTapX = mouseX;
