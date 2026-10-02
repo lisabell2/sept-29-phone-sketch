@@ -211,5 +211,16 @@ you double tap to add a heart to the screen, after 2 seconds the heart turns int
 #### Notes for further tuning
 - `TILT_CURVE` below 1 would invert the behaviour (more sensitive when nearly level, weaker when steep). Raise it for a more dramatic drop-off; lower it toward 1 for linear feel.
 - If sprites pass through each other when moving fast, reduce `MAX_SPEED` — or raise `SPRITE_SIZE_RATIO`, since collision radius scales with sprite size.
+
+### Tuning Pass 3: Speed Increase and Frame-Rate Independence
+- `GRAVITY_FORCE` `2.4` → **`4.5`**, `FRICTION_DAMPING` `0.998` → **`0.999`**, `MAX_SPEED` `22` → **`40`**.
+- The root cause of perceived slowness was not just the force values: the physics ran in raw per-frame units, so behaviour depended entirely on refresh rate. At 120Hz a phone integrates twice as often as a 60Hz laptop, and `FRICTION_DAMPING` is a per-frame multiplier, so a 120Hz device also lost twice as much speed per second. The same code felt slow and sluggish on one device and different on another.
+- Added `frameScale()` helper, used throughout `updateEntities()`: `constrain(deltaTime / (1000 / 60), 0.25, 3)`. This returns ~1.0 at 60fps, ~2.0 at 120fps, and is clamped at both ends so a slow frame or a backgrounded tab cannot spike the physics.
+- Gravity and position integration are multiplied by `frameScale()`, so acceleration is per-second rather than per-frame and a 120Hz phone moves sprites at the same perceived speed as a 60Hz laptop.
+- Damping is converted per-frame via `Math.pow(FRICTION_DAMPING, step)` rather than applied raw, which keeps the *total* energy loss per second constant across refresh rates instead of double-decaying at 120Hz.
+- `MAX_SPEED` is likewise scaled (`MAX_SPEED * step`) so the velocity cap is a real per-second ceiling, not a per-frame one that effectively halves the top speed on high-refresh displays.
+- Tunneling safety still holds: at 120Hz the effective per-frame travel stays near the 60Hz value because both force and cap scale together, and the 40px cap remains well under the 34%-of-width sprite diameter.
+- `frameRate()` added to the on-screen readout so the actual refresh rate is visible while testing — useful for confirming whether a device is running at 60 or 120.
+- `index.html` bumped to `sketch.js?v=6`.
 - Hardware sensors stay behind `window.sensorsEnabled`. On desktop the values read 0, so sprites settle and collide under gravity alone — real sliding requires the phone.
 - Assets live in `references/` (copied out of the skills folder): `character1.png`, `character2.png`, `layout.design.jpg`. Procedural fallbacks cover either PNG failing to load.

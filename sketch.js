@@ -7,12 +7,12 @@ const SPRITE_SIZE_RATIO = 0.34;
 const DOUBLE_TAP_MAX_DELAY = 300;
 const DOUBLE_TAP_MAX_DISTANCE = 25;
 const MAX_ENTITIES = 100;
-const GRAVITY_FORCE = 2.4;
-const FRICTION_DAMPING = 0.998;
+const GRAVITY_FORCE = 4.5;
+const FRICTION_DAMPING = 0.999;
 const RESTITUTION = 0.92;
 const TRANSFORM_DELAY_MS = 2000;
 const COLLISION_RESTITUTION = 0.95;
-const MAX_SPEED = 22;
+const MAX_SPEED = 40;
 const TILT_RANGE = 25;
 const TILT_CURVE = 1.7;
 const VERTICAL_GRAVITY_MULT = 1.6;
@@ -65,6 +65,7 @@ function draw() {
   text('rotationX: ' + nf(rotationX, 2, 1), 12, 30);
   text('rotationY: ' + nf(rotationY, 2, 1), 12, 48);
   text('rotationZ: ' + nf(rotationZ, 2, 1), 12, 66);
+  text('fps: ' + frameRate().toFixed(0), 12, 84);
 }
 
 function drawGrid() {
@@ -95,15 +96,18 @@ function spawnEntity(x, y) {
 
 function updateEntities() {
   const tilt = readTilt();
+  const step = frameScale();
+  const damping = Math.pow(FRICTION_DAMPING, step);
+  const maxSpeed = MAX_SPEED * step;
 
   for (const e of entities) {
-    e.vx = (e.vx + tilt.x * GRAVITY_FORCE) * FRICTION_DAMPING;
-    e.vy = (e.vy + tilt.y * GRAVITY_FORCE * VERTICAL_GRAVITY_MULT) * FRICTION_DAMPING;
+    e.vx = (e.vx + tilt.x * GRAVITY_FORCE * step) * damping;
+    e.vy = (e.vy + tilt.y * GRAVITY_FORCE * VERTICAL_GRAVITY_MULT * step) * damping;
 
     const speed = dist(0, 0, e.vx, e.vy);
-    if (speed > MAX_SPEED) {
-      e.vx = (e.vx / speed) * MAX_SPEED;
-      e.vy = (e.vy / speed) * MAX_SPEED;
+    if (speed > maxSpeed) {
+      e.vx = (e.vx / speed) * maxSpeed;
+      e.vy = (e.vy / speed) * maxSpeed;
     }
 
     e.x += e.vx;
@@ -161,6 +165,10 @@ function resolveEntityCollisions() {
       b.vy += impulseY;
     }
   }
+}
+
+function frameScale() {
+  return constrain(deltaTime / (1000 / 60), 0.25, 3);
 }
 
 function readTilt() {
