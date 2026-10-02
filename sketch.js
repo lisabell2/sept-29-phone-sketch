@@ -16,6 +16,7 @@ const MAX_SPEED = 40;
 const TILT_RANGE = 25;
 const TILT_CURVE = 1.7;
 const VERTICAL_GRAVITY_MULT = 1.6;
+const BUILD_ID = 'v6';
 
 let characterImg;
 let heartImg;
@@ -65,7 +66,7 @@ function draw() {
   text('rotationX: ' + nf(rotationX, 2, 1), 12, 30);
   text('rotationY: ' + nf(rotationY, 2, 1), 12, 48);
   text('rotationZ: ' + nf(rotationZ, 2, 1), 12, 66);
-  text('fps: ' + frameRate().toFixed(0), 12, 84);
+  text('fps: ' + frameRate().toFixed(0) + '  build: ' + BUILD_ID, 12, 84);
 }
 
 function drawGrid() {

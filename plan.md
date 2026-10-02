@@ -222,5 +222,6 @@ you double tap to add a heart to the screen, after 2 seconds the heart turns int
 - Tunneling safety still holds: at 120Hz the effective per-frame travel stays near the 60Hz value because both force and cap scale together, and the 40px cap remains well under the 34%-of-width sprite diameter.
 - `frameRate()` added to the on-screen readout so the actual refresh rate is visible while testing — useful for confirming whether a device is running at 60 or 120.
 - `index.html` bumped to `sketch.js?v=6`.
+- Added `BUILD_ID = 'v6'` constant, shown in the on-screen readout next to `fps`. This is a diagnostic: if the phone displays a different build string than expected, the device is running a cached copy and no amount of cache-busting in the URL will help until its site data is cleared. Bump `BUILD_ID` alongside the `?v=` number on every deploy.
 - Hardware sensors stay behind `window.sensorsEnabled`. On desktop the values read 0, so sprites settle and collide under gravity alone — real sliding requires the phone.
 - Assets live in `references/` (copied out of the skills folder): `character1.png`, `character2.png`, `layout.design.jpg`. Procedural fallbacks cover either PNG failing to load.
