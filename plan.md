@@ -169,3 +169,22 @@ you double tap to add a heart to the screen, after 2 seconds the heart turns int
 - Each entity stores `born: millis()` at spawn, and `updateEntities()` flips `e.isHeart = false` once `millis() - e.born >= TRANSFORM_DELAY_MS`.
 - Only the `isHeart` flag changes, so position and velocity are untouched across the swap — the sprite keeps its exact path with no sound or visual effect, as specified.
 - `drawEntities()` reads `isHeart` each frame to pick `heartImg`/`character2` art or `characterImg`/`character1` art, so the swap is automatic and needs no separate transform branch.
+
+### Step 8: Mutual Elastic Collisions Between All Sprites
+- Added tunable `COLLISION_RESTITUTION = 0.85`.
+- `updateEntities()` now ends with `resolveEntityCollisions()`, so collision response runs after integration and after the wall bounce in the same frame — sprites can never be pushed back out through an edge after a mutual hit.
+- `resolveEntityCollisions()` is a pairwise `for i` / `for j` loop over `entities`, treating each sprite as a circle of radius `size / 2`. `dist()` gives the centre distance, skipped when it already meets or exceeds the combined radii.
+- Zero-distance guard: if two sprites are exactly coincident (both spawned on the same pixel, or after a hard overlap) `dist()` returns 0 and the division below would produce `NaN`. In that case the code substitutes a `(1, 0)` axis and `d = 1` so the response stays finite and they still separate.
+- Overlap is resolved by splitting the penetration in half along the unit normal `n`, computed as `dx / d`, `dy / d`, moving each sprite by `overlap = (minDistance - d) / 2` in opposite directions. Symmetric splitting avoids drift toward one sprite.
+- Elastic impulse uses the relative velocity projected onto the normal: `separatingSpeed = (b.v - a.v) · n`. `atan2` is not needed because the normal is derived from the position delta directly.
+- The `if (separatingSpeed > 0) continue` guard makes the response idempotent — a pair already moving apart is skipped, which prevents the jitter/spiral-of-death when two sprites rest in contact under tilt gravity.
+- `impulse = (-(1 + COLLISION_RESTITUTION) * separatingSpeed) / 2` is then subtracted from `a.v` and added to `b.v`, giving equal-and-opposite momentum exchange with `COLLISION_RESTITUTION` controlling bounciness between sprites (separate from `RESTITUTION`, which only applies to screen edges).
+- Both hearts and characters collide, since the check reads only position and size.
+
+---
+
+## Final State Notes
+- All eight steps are implemented. Bumping behaviour comes entirely from the constants block at the top of `sketch.js`; nothing below `setup()` needs editing for tuning.
+- `index.html` references `sketch.js?v=3`. This query string must be incremented on every deploy, because GitHub Pages serves `Cache-Control: max-age=600` and mobile browsers will otherwise run a stale sketch for up to 10 minutes.
+- Hardware sensors stay behind `window.sensorsEnabled`. On desktop the values read 0, so sprites settle and collide under gravity alone — real sliding requires the phone.
+- Assets live in `references/` (copied out of the skills folder): `character1.png`, `character2.png`, `layout.design.jpg`. Procedural fallbacks cover either PNG failing to load.

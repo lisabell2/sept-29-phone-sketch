@@ -11,6 +11,7 @@ const GRAVITY_FORCE = 0.35;
 const FRICTION_DAMPING = 0.98;
 const RESTITUTION = 0.75;
 const TRANSFORM_DELAY_MS = 2000;
+const COLLISION_RESTITUTION = 0.85;
 
 let characterImg;
 let heartImg;
@@ -99,6 +100,54 @@ function updateEntities() {
     bounceWithinScreen(e);
     if (e.isHeart && millis() - e.born >= TRANSFORM_DELAY_MS) {
       e.isHeart = false;
+    }
+  }
+
+  resolveEntityCollisions();
+}
+
+function resolveEntityCollisions() {
+  for (let i = 0; i < entities.length; i++) {
+    for (let j = i + 1; j < entities.length; j++) {
+      const a = entities[i];
+      const b = entities[j];
+      const minDistance = (a.size + b.size) / 2;
+
+      let dx = b.x - a.x;
+      let dy = b.y - a.y;
+      let d = dist(a.x, a.y, b.x, b.y);
+
+      if (d >= minDistance) continue;
+
+      if (d === 0) {
+        dx = 1;
+        dy = 0;
+        d = 1;
+      }
+
+      const nx = dx / d;
+      const ny = dy / d;
+      const overlap = (minDistance - d) / 2;
+
+      a.x -= nx * overlap;
+      a.y -= ny * overlap;
+      b.x += nx * overlap;
+      b.y += ny * overlap;
+
+      const relativeVelX = b.vx - a.vx;
+      const relativeVelY = b.vy - a.vy;
+      const separatingSpeed = relativeVelX * nx + relativeVelY * ny;
+
+      if (separatingSpeed > 0) continue;
+
+      const impulse = (-(1 + COLLISION_RESTITUTION) * separatingSpeed) / 2;
+      const impulseX = nx * impulse;
+      const impulseY = ny * impulse;
+
+      a.vx -= impulseX;
+      a.vy -= impulseY;
+      b.vx += impulseX;
+      b.vy += impulseY;
     }
   }
 }
