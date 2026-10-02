@@ -135,3 +135,19 @@ you double tap to add a heart to the screen, after 2 seconds the heart turns int
 - Added tunable constant `SENSOR_PROMPT_TEXT = 'Tap to enable motion sensors'`.
 - `setup()` now calls `enableSensorTap(SENSOR_PROMPT_TEXT)` after `lockGestures()`, so the permission request happens from a real user tap (required by iOS transient activation).
 - `draw()` reads motion only behind `if (window.sensorsEnabled) return;` — before the tap the prompt overlay is the only thing on screen; after it, live `rotationX`, `rotationY`, `rotationZ` values are drawn in the top-left using `nf(rotationX, 2, 1)` for fixed one-decimal formatting.
+
+### Step 4: Asset Preload with Vector Fallbacks
+- Copied the three reference files into the project's own `references/` directory: `character1.png`, `character2.png`, `layout.design.jpg`. Previously the PNGs only existed inside `.agents/skills/p5js-2x/references/`, which is skill documentation, not sketch assets.
+- Added tunable constant `SPRITE_SIZE_RATIO = 0.14`.
+- Replaced `preload()` with `loadAssets()`, an `async` function called at the end of `setup()` that uses `await loadImage()` — the p5.js 2.x pattern, since 2.x `load*` calls return Promises and `preload()` is no longer the default idiom.
+- Each load is wrapped in its own `try`/`catch`, so a missing file leaves the variable `null` instead of throwing and blanking the sketch.
+- `drawAssetPreview()` draws both sprites centered at 14% of canvas width, and `drawFallbackHeart()` / `fallbackCircle()` render a procedural pink heart and blue circle when the corresponding PNG failed to load.
+- `imageMode(CENTER)` is set once in `loadAssets()` so all later sprite drawing positions from the center.
+- The preview pair is temporary: Step 6 replaces this with real spawned entities.
+
+### Step 5: Double-Tap Gesture Detection
+- Added tunables `DOUBLE_TAP_MAX_DELAY = 300` and `DOUBLE_TAP_MAX_DISTANCE = 25`, plus module-level `lastTapTime`, `lastTapX`, `lastTapY`, `debugMarker`.
+- Implemented detection in `mousePressed()` using `millis()` for the time window and `dist()` for drift between taps. p5.js 2.x unifies mouse and touch under the pointer model, so this one callback covers finger taps on the phone; p5 1.x `touchStarted()` is not used.
+- `lastTapTime` is reset to `0` after a successful pair so a third tap cannot chain into a false triple-tap match.
+- `drawDebugMarker()` flashes a green 24px circle for 500ms at the detected point and logs coordinates, so the gesture is verifiable before spawning exists.
+- `mousePressed()` returns `false` to leave touch handling to p5-phone's gesture lock.
