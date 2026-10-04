@@ -223,5 +223,12 @@ you double tap to add a heart to the screen, after 2 seconds the heart turns int
 - `frameRate()` added to the on-screen readout so the actual refresh rate is visible while testing — useful for confirming whether a device is running at 60 or 120.
 - `index.html` bumped to `sketch.js?v=6`.
 - Added `BUILD_ID = 'v6'` constant, shown in the on-screen readout next to `fps`. This is a diagnostic: if the phone displays a different build string than expected, the device is running a cached copy and no amount of cache-busting in the URL will help until its site data is cleared. Bump `BUILD_ID` alongside the `?v=` number on every deploy.
+
+### Asset Swap: New Heart Image
+- Replaced `references/character2.png` with a new pixel-art heart (414KB → 814KB). The path is unchanged, so no code change was needed for the swap itself.
+- Added `assetUrl(file)` helper appending `?v=BUILD_ID` to asset paths, and routed both `loadImage()` calls through it. This is necessary because GitHub Pages caches the PNGs for 10 minutes too — bumping the `?v=` on `sketch.js` alone refreshes the code but leaves the phone showing the *old cached PNG*. The query string is what makes replaced art appear immediately.
+- `BUILD_ID` → `'v7'` and `index.html` → `sketch.js?v=7`, both bumped together.
+- One asset can now be refreshed independently of the code: bumping `BUILD_ID` invalidates both the script and every image in one step.
+- Note on the new art: it is a wide, near-square-bounding shape with a transparent background. Sprites still draw into a square box of `SPRITE_SIZE_RATIO` of screen width and collide as circles of `size / 2`, so a wide heart will visually overlap neighbours slightly more than the collision model implies, and will render slightly smaller than its bounding box implies.
 - Hardware sensors stay behind `window.sensorsEnabled`. On desktop the values read 0, so sprites settle and collide under gravity alone — real sliding requires the phone.
 - Assets live in `references/` (copied out of the skills folder): `character1.png`, `character2.png`, `layout.design.jpg`. Procedural fallbacks cover either PNG failing to load.

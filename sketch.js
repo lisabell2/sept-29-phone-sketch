@@ -16,7 +16,7 @@ const MAX_SPEED = 40;
 const TILT_RANGE = 25;
 const TILT_CURVE = 1.7;
 const VERTICAL_GRAVITY_MULT = 1.6;
-const BUILD_ID = 'v6';
+const BUILD_ID = 'v7';
 
 let characterImg;
 let heartImg;
@@ -38,16 +38,20 @@ function setup() {
 
 async function loadAssets() {
   try {
-    characterImg = await loadImage('references/character1.png');
+    characterImg = await loadImage(assetUrl('character1.png'));
   } catch (err) {
     characterImg = null;
   }
   try {
-    heartImg = await loadImage('references/character2.png');
+    heartImg = await loadImage(assetUrl('character2.png'));
   } catch (err) {
     heartImg = null;
   }
   imageMode(CENTER);
+}
+
+function assetUrl(file) {
+  return 'references/' + file + '?v=' + BUILD_ID;
 }
 
 function draw() {
