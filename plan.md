@@ -232,3 +232,52 @@ you double tap to add a heart to the screen, after 2 seconds the heart turns int
 - Note on the new art: it is a wide, near-square-bounding shape with a transparent background. Sprites still draw into a square box of `SPRITE_SIZE_RATIO` of screen width and collide as circles of `size / 2`, so a wide heart will visually overlap neighbours slightly more than the collision model implies, and will render slightly smaller than its bounding box implies.
 - Hardware sensors stay behind `window.sensorsEnabled`. On desktop the values read 0, so sprites settle and collide under gravity alone — real sliding requires the phone.
 - Assets live in `references/` (copied out of the skills folder): `character1.png`, `character2.png`, `layout.design.jpg`. Procedural fallbacks cover either PNG failing to load.
+
+---
+
+## Rewrite: 4-Player Shared World (from `plan.md2.md`)
+
+Scope delivered, per request: all 4 users add + remove sprites in only their own region, zooming out shows the other 3 regions live, and succeeding the back-camera color challenge wipes every hater. The remaining `plan.md2.md` steps (dual-camera reach-in, per-scan colored rewards, etc.) are **not** in this build.
+
+### Architecture
+- `sketch.js` rewritten around a **2400×2400 torus world** split into 4 fixed 1200×1200 regions. `regionAt(x, y)` maps any world point to region 0–3; `wrapX()`/`wrapY()` wrap coordinates, so sprites leaving one edge re-enter the opposite one. Wall bouncing is gone: `RESTITUTION`, `COLLISION_RESTITUTION`, `FRICTION_DAMPING`, `SPRITE_SIZE_RATIO` and the screen-bounce/collision code were removed.
+- **PeerJS host/client topology** (`peerjs@1.5.4` added to `index.html`). The first tab to claim `ROOM_ID + '-host'` becomes the authoritative host; everyone else connects as a client. The host simulates *everything* (tilt physics per player, hater wandering/fleeing, infection, the heart timer, the challenge clock) and broadcasts full state ~15×/sec (`NETWORK_SYNC_RATE_MS = 66`). Clients interpolate positions (`clientTick` lerp with a torus-jump snap) and send only their view/tilt.
+- Clients are assigned regions in join order (host = region 0); each phone's camera opens centered on its own region (`centerOnRegion`), so you start on "your island" and pinch out to find the other three.
+- If PeerJS is unavailable, the room is full, or no host answers within ~3 join attempts / 8s, the sketch falls back to `goSolo()` — a local, offline host on region 0 flagged "Solo mode" in the HUD.
+
+### Region rules
+- Double-tap in your own region spawns a heart → character after `HEART_TRANSFORM_MS = 2000` (same as before). Double-tap outside it shows "That is not your region" and nothing spawns.
+- Kill is also region-gated, on both ends: the client only targets entities inside its region (`findKillTarget`), and the host re-validates every `KILL` message against the sender's assigned region, so a modified client cannot remove things from someone else's region. The same validation guards `SPAWN`.
+- Anyone can kill a **hater** that wanders into their region; haters flee at `HATER_FLEE_SPEED` whenever any player's current view contains them, otherwise wander at `HATER_BASE_SPEED`, and infect non-hater sprites within `INFECTION_RADIUS` (tinted dark).
+
+### Color challenge (hater wipe)
+- The host schedules the first challenge after `FIRST_CHALLENGE_DELAY_MS = 15000`, then every `CHALLENGE_INTERVAL_MS = 45000` after a win or a miss.
+- When active, every phone shows a HUD card with a random color name + swatch, a 30s countdown (`COLOR_CHALLENGE_DURATION_SEC`), a small live back-camera window (`facingMode: environment`) and a green **Scan** button. Pressing Scan samples the center 16×16 px of the camera feed (`sampleCameraColor`) and compares it to the target RGB with `COLOR_MATCH_THRESHOLD = 75`.
+- On a match the host runs `hostWipeHaters()`: every hater is removed, the challenge closes, "All haters wiped!" is broadcast, and the next one is scheduled 45s later. On a miss/timeout: "Challenge missed".
+- The camera is created lazily from the first user tap (`ensureCamera()` from `mousePressed`/`userSetupComplete`) so the permission prompt rides a real gesture. `camReady()` gates preview and sampling on `videoWidth > 0`, and a failed attempt releases the request flag after 6s so a later tap can retry.
+
+### Tunables replaced / added
+- Removed: `RESTITUTION`, `COLLISION_RESTITUTION`, `FRICTION_DAMPING`, `SPRITE_SIZE_RATIO`, `DOUBLE_TAP_MAX_DELAY`, `TRANSFORM_DELAY_MS` (renamed), old per-frame gravity constants.
+- Added: `ROOM_ID`, `MAX_PLAYERS = 4`, `WORLD_WIDTH/WORLD_HEIGHT = 2400`, `MIN_ZOOM/MAX_ZOOM`, `DOUBLE_TAP_TIME_MS`, `HEART_TRANSFORM_MS`, `SPRITE_SIZE = 55` (world px, screen-size independent), `HATER_COUNT = 6`, `HATER_BASE/FLEE_SPEED`, `INFECTION_RADIUS`, `KILL_HITBOX_RADIUS`, `COLOR_*`, `CAM_WINDOW_*`, `NETWORK_SYNC_RATE_MS`, `FIRST_CHALLENGE_DELAY_MS`, `CHALLENGE_INTERVAL_MS`, `MOVE_GRAVITY`, `MOVE_MAX_SPEED`. `MAX_ENTITIES = 100` kept as the global cap; tilt tuning (`TILT_RANGE`, `TILT_CURVE`, `VERTICAL_GRAVITY_MULT`) carried over unchanged.
+
+### Deviations from `plan.md2.md`
+- `MIN_ZOOM` is **0.14**, not the planned 0.35 — 0.35 shows only ~1.5 regions on a phone; 0.14 fits all 2400 world px on screen so the "zoom out and see the big picture" moment actually lands.
+- Input uses `mousePressed/mouseDragged/mouseReleased` + `touches[]` instead of the plan's `touchStarted/touchMoved` — p5.js 2.x removed the touch callbacks as no-ops. Pinch-zoom and one-finger pan are built on `touches[]`; `mouseWheel` zooms on desktop.
+- Kill is literal own-region-only (a hater that flees into someone else's quadrant can only be removed by that region's owner). This matches the plan's assumptions; the "chase across the map" reading would need a rule change.
+- `references/hater.png` does not exist yet — `tryLoad()` leaves `haterImg` null and `drawFallbackHater()` draws a dark spiky blob with red eyes. Drop the file into `references/` and it is used automatically (via `assetUrl`).
+- The plan's "infinite map" is a fixed 2400×2400 torus (the grid draws beyond the edges, so it *looks* endless in every direction).
+- Success grants the group wipe (per this build's scope), not the plan's extra colored character.
+
+### p5.js 2.x / p5-phone notes hit during this pass
+- p5 2.x reserves global names: our `screenToWorld()` collided with p5's built-in (fatal "Cannot redefine property" at load) → renamed `screenToWorldPoint()`. Top-level `const key` / `const step` also trip redeclaration warnings → renamed. Any new helper name should be checked against the 2.x reference.
+- Camera readiness must be checked via `navigator.mediaDevices` (not `window.mediaDevices`, which is undefined — this silently disabled the camera in the first draft).
+
+### Verification
+- Host path exercised live in a desktop browser: host claim, region-0 centering, 6 haters seeded/wandering/wrapping, double-tap spawn + 2s transform + double-tap kill, challenge cycle (activates → 30s → miss → reschedules), zoom to 0.14.
+- Message-level tests drove the host/client logic directly: `WELCOME` state application on a client (region 2, view centered, entities/owner synced), spawn accepted only in the sender's region, kills rejected outside it, `SCAN` success removing all 6 haters and clearing the challenge, tilt deltas (4.5/3.6 px per unit step), infection on contact, and torus interpolation.
+- WebRTC DataChannels cannot negotiate inside the OpenCode embedded browser, so the live multi-tab sync path was **not** end-to-end verified here — it needs a real test on 2+ phones (or two separate desktop browsers). The PeerJS message flow itself is exercised via the simulated messages above.
+
+### Known limitations / next steps
+- If the host phone locks its screen, its simulation pauses for everyone (single-host model). Clients drop to solo after ~30s of dead host; reloading rejoins.
+- Everyone visiting the deployed page shares one fixed room (`ROOM_ID`), so the 5th+ visitor lands in solo mode — by design for the 4-player piece.
+- `index.html` → `sketch.js?v=8` and `BUILD_ID = 'v8'`, bumped together per the cache-busting convention. The HUD keeps the `fps:` / `build:` readout bottom-left and adds `haters left: N`.
