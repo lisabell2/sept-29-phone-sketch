@@ -281,3 +281,19 @@ Scope delivered, per request: all 4 users add + remove sprites in only their own
 - If the host phone locks its screen, its simulation pauses for everyone (single-host model). Clients drop to solo after ~30s of dead host; reloading rejoins.
 - Everyone visiting the deployed page shares one fixed room (`ROOM_ID`), so the 5th+ visitor lands in solo mode — by design for the 4-player piece.
 - `index.html` → `sketch.js?v=8` and `BUILD_ID = 'v8'`, bumped together per the cache-busting convention. The HUD keeps the `fps:` / `build:` readout bottom-left and adds `haters left: N`.
+
+### Art Swap & Tuning Pass 4: Map Base, Three Profile Looks, Calmer Motion (v9)
+- **New art** (all in `references/`, loaded through `assetUrl()` so `BUILD_ID` invalidates them): `map.png` (1254×1254), `goodpfp1.png` / `goodpfp.2.png` / `goodpfp.3.png` (1254×1254 each), `badpfp.png` (1235×1274) used as the hater art in place of the never-supplied `hater.png`.
+- **Map as the base**: `drawGrid()` (and `GRID_SIZE` / `GRID_LINE_COLOR` / `GRID_LINE_WEIGHT`) removed. `drawMap()` draws `map.png` stretched over exactly `0,0 → WORLD_WIDTH,WORLD_HEIGHT` with `imageMode(CORNER)` inside `push()`/`pop()` so the CENTER mode used by sprites is preserved. Outside the world the canvas stays white.
+- Region outlines restyled for the photo base: your region gets a brighter blue border, the other three semi-transparent white; the region labels now sit on backing chips (blue for yours, translucent black otherwise) so they stay readable over the map photo. The translucent blue fill that used to wash your whole region is gone.
+- **Three good looks, randomly picked**: `characterImg` replaced by `goodPfps = []`. Each spawned character stores `look: Math.floor(Math.random() * LOOK_COUNT)` (`LOOK_COUNT = 3`), drawn as `goodPfps[look % length]`. The heart still spawns first and transforms after 2s into one of the three looks. `look` is a plain entity field, so it syncs to clients automatically — it was added to both branches of `applyState()`'s field copy. `character1.png` is no longer loaded.
+- The old `character2.png` heart is unchanged, and `badpfp.png` renders un-tinted (the `tint(70)` on haters was dropped since the art itself reads as "bad"). Infected characters are still darkened with `tint(70)`.
+- **Calmer motion** — the old constants were inherited from the single-screen sketch and were wildly fast at world scale (40px/frame crosses the whole 2400px map in one second):
+  - `MOVE_GRAVITY` `4.5` → **`0.5`** (tilt acceleration, previously hardcoded in `updateCharacters`).
+  - `MOVE_MAX_SPEED` `40` → **`6`** (~360 world px/s at full tilt — about 8× slower; a 1200px region now takes ~3.3s to cross).
+  - New `MOVE_DAMPING = 0.985`, applied as `Math.pow(MOVE_DAMPING, step)` to velocity each step — sprites now glide to a stop within a couple of seconds when the phone is level, instead of drifting forever.
+  - `TILT_RANGE` `25` → **`30`** and `TILT_CURVE` `1.7` → **`2.0`**: full force now needs a steeper tilt and the response is gentler near level, giving finer low-speed control.
+- **Bigger sprites**: `SPRITE_SIZE` `55` → **`70`** world px; `INFECTION_RADIUS` `35` → `45` and `KILL_HITBOX_RADIUS` `40` → `50` scaled to match.
+- Verified locally: all assets load; random `look` spread across the three pfps; one second of full tilt moves a sprite ~180px horizontally / ~290px vertically (previously up to 2400px/s) and velocity decays to a near-stop when level; map, region chips, and sprites render with no console errors.
+- `BUILD_ID` → `'v9'`, `index.html` → `sketch.js?v=9`, bumped together.
+

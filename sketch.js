@@ -1,7 +1,4 @@
 // Numbers to tune
-const GRID_SIZE = 36;
-const GRID_LINE_COLOR = 232;
-const GRID_LINE_WEIGHT = 1;
 const SENSOR_PROMPT_TEXT = 'Tap to start';
 const ROOM_ID = 'atelier-shared-world-4p';
 const MAX_PLAYERS = 4;
@@ -12,13 +9,13 @@ const MAX_ZOOM = 1.5;
 const DOUBLE_TAP_TIME_MS = 300;
 const DOUBLE_TAP_MAX_DISTANCE = 25;
 const HEART_TRANSFORM_MS = 2000;
-const SPRITE_SIZE = 55;
+const SPRITE_SIZE = 70;
 const MAX_ENTITIES = 100;
 const HATER_COUNT = 6;
 const HATER_BASE_SPEED = 1.5;
 const HATER_FLEE_SPEED = 4.0;
-const INFECTION_RADIUS = 35;
-const KILL_HITBOX_RADIUS = 40;
+const INFECTION_RADIUS = 45;
+const KILL_HITBOX_RADIUS = 50;
 const COLOR_CHALLENGE_DURATION_SEC = 30;
 const COLOR_MATCH_THRESHOLD = 75;
 const CAM_WINDOW_WIDTH = 120;
@@ -26,12 +23,14 @@ const CAM_WINDOW_HEIGHT = 90;
 const NETWORK_SYNC_RATE_MS = 66;
 const FIRST_CHALLENGE_DELAY_MS = 15000;
 const CHALLENGE_INTERVAL_MS = 45000;
-const TILT_RANGE = 25;
-const TILT_CURVE = 1.7;
+const TILT_RANGE = 30;
+const TILT_CURVE = 2.0;
 const VERTICAL_GRAVITY_MULT = 1.6;
-const MOVE_GRAVITY = 4.5;
-const MOVE_MAX_SPEED = 40;
-const BUILD_ID = 'v8';
+const MOVE_GRAVITY = 0.5;
+const MOVE_MAX_SPEED = 6;
+const MOVE_DAMPING = 0.985;
+const LOOK_COUNT = 3;
+const BUILD_ID = 'v9';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -46,9 +45,10 @@ const COLORS = [
   { name: 'black', rgb: [35, 35, 35] },
 ];
 
-let characterImg;
+let goodPfps = [];
 let heartImg;
 let haterImg;
+let mapImg;
 
 let cam;
 let camGfx;
@@ -117,9 +117,15 @@ function userSetupComplete() {
 }
 
 async function loadAssets() {
-  characterImg = await tryLoad('character1.png');
+  const looks = ['goodpfp1.png', 'goodpfp.2.png', 'goodpfp.3.png'];
+  goodPfps = [];
+  for (const file of looks) {
+    const img = await tryLoad(file);
+    if (img) goodPfps.push(img);
+  }
   heartImg = await tryLoad('character2.png');
-  haterImg = await tryLoad('hater.png');
+  haterImg = await tryLoad('badpfp.png');
+  mapImg = await tryLoad('map.png');
   imageMode(CENTER);
 }
 
@@ -152,28 +158,17 @@ function applyCamera() {
 }
 
 function drawWorld() {
-  drawGrid();
+  drawMap();
   drawRegions();
   drawEntities();
 }
 
-function drawGrid() {
-  const halfW = width / (2 * view.zoom);
-  const halfH = height / (2 * view.zoom);
-  const left = view.x - halfW;
-  const top = view.y - halfH;
-
-  stroke(GRID_LINE_COLOR);
-  strokeWeight(GRID_LINE_WEIGHT / view.zoom);
-  const startX = Math.floor(left / GRID_SIZE) * GRID_SIZE;
-  const startY = Math.floor(top / GRID_SIZE) * GRID_SIZE;
-
-  for (let x = startX; x < left + halfW * 2; x += GRID_SIZE) {
-    line(x, top, x, top + halfH * 2);
-  }
-  for (let y = startY; y < top + halfH * 2; y += GRID_SIZE) {
-    line(left, y, left + halfW * 2, y);
-  }
+function drawMap() {
+  if (!mapImg) return;
+  push();
+  imageMode(CORNER);
+  image(mapImg, 0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+  pop();
 }
 
 function drawRegions() {
@@ -186,20 +181,29 @@ function drawRegions() {
 
     noFill();
     if (mine) {
-      fill(60, 130, 255, 18);
-      stroke(60, 130, 255, 180);
-      strokeWeight(3 / view.zoom);
+      stroke(60, 130, 255, 220);
+      strokeWeight(4 / view.zoom);
     } else {
-      stroke(200);
-      strokeWeight(1 / view.zoom);
+      stroke(255, 160);
+      strokeWeight(2 / view.zoom);
     }
     rect(b.x, b.y, halfW, halfH);
 
+    // Label on a backing chip so it stays readable on the map photo.
+    const label = mine ? 'YOUR REGION' : 'REGION ' + r;
+    const ts = 22 / view.zoom;
+    textSize(ts);
+    const tw = textWidth(label) + 26 / view.zoom;
+    const th = ts + 12 / view.zoom;
+    const lx = b.x + halfW / 2 - tw / 2;
+    const ly = b.y + 16 / view.zoom;
+
     noStroke();
-    fill(mine ? color(40, 90, 200) : color(150));
-    textAlign(CENTER, TOP);
-    textSize(20 / view.zoom);
-    text(mine ? 'YOUR REGION' : 'REGION ' + r, b.x + halfW / 2, b.y + 8 / view.zoom);
+    fill(mine ? color(40, 90, 200, 210) : color(0, 0, 0, 130));
+    rect(lx, ly, tw, th, 8 / view.zoom);
+    fill(255);
+    textAlign(CENTER, CENTER);
+    text(label, lx + tw / 2, ly + th / 2);
   }
 }
 
@@ -242,9 +246,7 @@ function drawEntities() {
 function drawSprite(e) {
   if (e.type === 'hater') {
     if (haterImg) {
-      tint(70);
       image(haterImg, e.x, e.y, SPRITE_SIZE, SPRITE_SIZE);
-      noTint();
     } else {
       drawFallbackHater(e.x, e.y, SPRITE_SIZE);
     }
@@ -266,10 +268,12 @@ function drawSprite(e) {
     tint(e.color[0], e.color[1], e.color[2]);
   }
 
-  if (characterImg) {
-    image(characterImg, e.x, e.y, SPRITE_SIZE, SPRITE_SIZE);
+  const look = e.look || 0;
+  const img = goodPfps.length ? goodPfps[look % goodPfps.length] : null;
+  if (img) {
+    image(img, e.x, e.y, SPRITE_SIZE, SPRITE_SIZE);
   } else {
-    fallbackCircle(e.x, e.y, SPRITE_SIZE);
+    fallbackCircle(e.x, e.y, SPRITE_SIZE, look);
   }
   noTint();
 }
@@ -283,8 +287,15 @@ function drawFallbackHeart(cx, cy, size) {
   triangle(cx, cy + size * 0.32, cx - r * 0.98, cy - size * 0.02, cx + r * 0.98, cy - size * 0.02);
 }
 
-function fallbackCircle(cx, cy, size) {
-  fill(90, 140, 220);
+const FALLBACK_LOOKS = [
+  [90, 140, 220],
+  [240, 150, 60],
+  [130, 200, 120],
+];
+
+function fallbackCircle(cx, cy, size, look) {
+  const c = FALLBACK_LOOKS[(look || 0) % FALLBACK_LOOKS.length];
+  fill(c[0], c[1], c[2]);
   noStroke();
   circle(cx, cy, size);
 }
@@ -729,12 +740,14 @@ function applyState(state, snap) {
       existing.color = e.color;
       existing.type = e.type;
       existing.owner = e.owner;
+      existing.look = e.look;
       next.push(existing);
     } else {
       next.push({
         id: e.id,
         type: e.type,
         owner: e.owner,
+        look: e.look,
         x: e.x,
         y: e.y,
         tx: e.x,
@@ -853,15 +866,17 @@ function fleeTarget(e) {
 }
 
 function updateCharacters(step, now) {
+  const damp = Math.pow(MOVE_DAMPING, step);
+
   for (const e of entities) {
     if (e.type === 'hater') continue;
 
     const tilt = playerTilt[e.owner] || { x: 0, y: 0 };
-    e.vx = (e.vx || 0) + tilt.x * 4.5 * step;
-    e.vy = (e.vy || 0) + tilt.y * 4.5 * VERTICAL_GRAVITY_MULT * step;
+    e.vx = ((e.vx || 0) + tilt.x * MOVE_GRAVITY * step) * damp;
+    e.vy = ((e.vy || 0) + tilt.y * MOVE_GRAVITY * VERTICAL_GRAVITY_MULT * step) * damp;
 
     const speed = Math.sqrt(e.vx * e.vx + e.vy * e.vy);
-    const maxSpeed = 40 * step;
+    const maxSpeed = MOVE_MAX_SPEED * step;
     if (speed > maxSpeed) {
       e.vx = (e.vx / speed) * maxSpeed;
       e.vy = (e.vy / speed) * maxSpeed;
@@ -923,6 +938,7 @@ function spawnCharacter(x, y, color, owner) {
     id: nextEntityId++,
     type: 'character',
     owner: owner || localId,
+    look: Math.floor(Math.random() * LOOK_COUNT),
     x: x,
     y: y,
     tx: x,
