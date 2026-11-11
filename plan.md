@@ -316,3 +316,14 @@ Scope delivered, per request: all 4 users add + remove sprites in only their own
 - Post-mortem on "the color challenge disappeared from mobile": the live site was verified serving correct v10 after the revert — the symptom was deploy-cache skew (a phone still running cached v11 client code ignores a v10 host's single-`challenge` state field, so everything else syncs but no banner ever appears). The `build:` readout bottom-left confirms which version a phone is actually running; the `?v=12` bump clears the skew on its own.
 - `BUILD_ID` → `'v12'`, `index.html` → `sketch.js?v=12`, bumped together.
 
+### Detection Pass: 30s First Challenge, Exposure-Tolerant Color Match (v13)
+- **First challenge now fires 30s after start** (`FIRST_CHALLENGE_DELAY_MS` 15000 → 30000), on both the host boot path and the solo fallback.
+- **Color detection rebuilt to survive phone cameras** — root cause of "scanned 3 shades of white, failed every time": the old check was raw RGB Euclidean distance (≤ 75), and a phone's auto-exposure meters a white surface down to gray (a `[240,240,240]` target vs a `[150,150,150]` read is distance ≈ 156 — a guaranteed miss), with auto-white-balance tinting on top. New `colorMatches(sampled, target)`:
+  - Fast path: the old raw-RGB distance check still passes well-lit, accurately-balanced scans instantly.
+  - White/black targets (no hue to compare): the sample must also be colorless (saturation ≤ 0.22) and land on the right half of the brightness range — white accepts lightness ≥ 0.4, black ≤ 0.38 (no overlap, so white/black can't substitute for each other).
+  - Colored targets: circular hue distance ≤ 35°, sample saturation ≥ 0.18 (a gray wall can't match a color), lightness within ± 0.25 of the target (absorbs auto-exposure drift). Helper functions `rgbToHsl()` / `hueDistanceDeg()`.
+  - The "No match" toast now reports what the camera saw (e.g. "No match — saw 148, 152, 150"), so exposure problems are visible instead of silent.
+  - Known, accepted looseness: genuinely adjacent hues cross-match (red↔orange 31°, brown↔orange 7°, pink↔red 29° — all inside the 35° window); distinguishing them under auto-white-balance isn't reliably possible anyway, and distant hues (green↔yellow 81°, blue↔purple 55°) still stay distinct.
+- Verified offline in a JS runtime (no browser tooling this session): 25-case suite covering the reported bug — gray-metered white `[150,150,150]`, darker `[120,120,120]`, warm-tinted white `[190,175,155]` all now match white; badly underexposed `[90,90,90]` correctly still fails; white/gray walls correctly fail red/black/green targets; dim and overexposed colored samples (red `[140,30,30]` / `[255,120,120]`, etc.) match their colors. All 25 passed. Plus brace/paren balance and a served-file syntax check.
+- `BUILD_ID` → `'v13'`, `index.html` → `sketch.js?v=13`, bumped together.
+

@@ -18,12 +18,20 @@ const INFECTION_RADIUS = 45;
 const KILL_HITBOX_RADIUS = 50;
 const COLOR_CHALLENGE_DURATION_SEC = 30;
 const COLOR_MATCH_THRESHOLD = 75;
+// Perception-based matching tolerances (see colorMatches): phones
+// auto-expose and auto-white-balance, so brightness is unreliable.
+const COLOR_HUE_TOLERANCE_DEG = 35;
+const COLOR_SAT_MIN = 0.18;
+const COLOR_LIGHTNESS_TOLERANCE = 0.25;
+const COLOR_ACHROMATIC_SAT_MAX = 0.22;
+const COLOR_WHITE_LUM_MIN = 0.4;
+const COLOR_BLACK_LUM_MAX = 0.38;
 const CHALLENGE_BANNER_TOP = 12;
 const CHALLENGE_BANNER_HEIGHT = 84;
 const CAM_WINDOW_WIDTH = 200;
 const CAM_WINDOW_HEIGHT = 150;
 const NETWORK_SYNC_RATE_MS = 66;
-const FIRST_CHALLENGE_DELAY_MS = 15000;
+const FIRST_CHALLENGE_DELAY_MS = 30000;
 const CHALLENGE_INTERVAL_MS = 45000;
 const TILT_RANGE = 25;
 const TILT_CURVE = 1.3;
@@ -32,7 +40,7 @@ const MOVE_GRAVITY = 1.6;
 const MOVE_MAX_SPEED = 11;
 const MOVE_DAMPING = 0.995;
 const LOOK_COUNT = 3;
-const BUILD_ID = 'v12';
+const BUILD_ID = 'v13';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -1135,13 +1143,18 @@ function onScanPressed() {
     return;
   }
 
-  const d = dist(sampled[0], sampled[1], sampled[2], challenge.rgb[0], challenge.rgb[1], challenge.rgb[2]);
-
-  if (d <= COLOR_MATCH_THRESHOLD) {
+  if (colorMatches(sampled, challenge.rgb)) {
     sendToHost({ type: 'SCAN', success: true });
     showMessage('Color found!');
   } else {
-    showMessage('No match — try again');
+    // Report what the camera actually saw — phones under auto-exposure
+    // render white as gray, and this readout makes that visible.
+    showMessage(
+      'No match — saw ' +
+        Math.round(sampled[0]) + ', ' +
+        Math.round(sampled[1]) + ', ' +
+        Math.round(sampled[2])
+    );
   }
 }
 
@@ -1176,6 +1189,60 @@ function sampleCameraColor() {
 
   if (n === 0) return null;
   return [rr / n, gg / n, bb / n];
+}
+
+// Exposure-tolerant color matching. A phone camera meters a white wall
+// down to pale gray and tints colors with auto-white-balance, so raw RGB
+// distance alone fails on exactly the surfaces people scan. Fast path:
+// the classic RGB distance. Slow path: compare hue + saturation +
+// lightness, which survives brightness drift.
+function colorMatches(sampled, target) {
+  const rawD = dist(sampled[0], sampled[1], sampled[2], target[0], target[1], target[2]);
+  if (rawD <= COLOR_MATCH_THRESHOLD) return true;
+
+  const s = rgbToHsl(sampled[0], sampled[1], sampled[2]);
+  const t = rgbToHsl(target[0], target[1], target[2]);
+
+  // White / black targets carry no hue: accept anything still colorless
+  // that lands on the right half of the brightness range.
+  if (t[1] < COLOR_ACHROMATIC_SAT_MAX) {
+    if (s[1] > COLOR_ACHROMATIC_SAT_MAX) return false;
+    return t[2] >= 0.5 ? s[2] >= COLOR_WHITE_LUM_MIN : s[2] <= COLOR_BLACK_LUM_MAX;
+  }
+
+  // Colored target: match the hue, require real saturation (a gray wall
+  // must not match), and allow wide brightness drift from auto-exposure.
+  return (
+    s[1] >= COLOR_SAT_MIN &&
+    hueDistanceDeg(s[0], t[0]) <= COLOR_HUE_TOLERANCE_DEG &&
+    Math.abs(s[2] - t[2]) <= COLOR_LIGHTNESS_TOLERANCE
+  );
+}
+
+function rgbToHsl(r, g, b) {
+  const rr = r / 255;
+  const gg = g / 255;
+  const bb = b / 255;
+  const max = Math.max(rr, gg, bb);
+  const min = Math.min(rr, gg, bb);
+  const lum = (max + min) / 2;
+  let hueDeg = 0;
+  let sat = 0;
+  const d = max - min;
+
+  if (d > 0.0001) {
+    sat = lum > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === rr) hueDeg = 60 * (((gg - bb) / d) % 6);
+    else if (max === gg) hueDeg = 60 * ((bb - rr) / d + 2);
+    else hueDeg = 60 * ((rr - gg) / d + 4);
+  }
+  if (hueDeg < 0) hueDeg += 360;
+  return [hueDeg, sat, lum];
+}
+
+function hueDistanceDeg(a, b) {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
 }
 
 // ---------- shared helpers ----------
