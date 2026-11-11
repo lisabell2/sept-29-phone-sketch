@@ -11,9 +11,9 @@ const DOUBLE_TAP_MAX_DISTANCE = 25;
 const HEART_TRANSFORM_MS = 2000;
 const SPRITE_SIZE = 70;
 const MAX_ENTITIES = 100;
-const HATER_COUNT = 6;
+// Haters only arrive via the double-tap reveal (no boot seeding) and
+// wander inside the region they spawned in (no fleeing to the edges).
 const HATER_BASE_SPEED = 1.5;
-const HATER_FLEE_SPEED = 4.0;
 const INFECTION_RADIUS = 45;
 const KILL_HITBOX_RADIUS = 50;
 const COLOR_CHALLENGE_DURATION_SEC = 30;
@@ -41,7 +41,10 @@ const MOVE_MAX_SPEED = 11;
 const MOVE_DAMPING = 0.995;
 const REGION_BOUNCE = 0.55;
 const LOOK_COUNT = 3;
-const BUILD_ID = 'v14';
+// A spawned heart reveals as one of LOOK_COUNT + 1 outcomes: one of the
+// positive profiles, or the hater. 0.25 = a 1-in-4 chance.
+const HATER_SPAWN_CHANCE = 0.25;
+const BUILD_ID = 'v17';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -255,20 +258,22 @@ function drawEntities() {
 }
 
 function drawSprite(e) {
-  if (e.type === 'hater') {
-    if (haterImg) {
-      image(haterImg, e.x, e.y, SPRITE_SIZE, SPRITE_SIZE);
-    } else {
-      drawFallbackHater(e.x, e.y, SPRITE_SIZE);
-    }
-    return;
-  }
-
+  // The heart disguise comes first: a hater still in its heart stage
+  // must draw as a heart, exactly like the positive icons.
   if (e.isHeart) {
     if (heartImg) {
       image(heartImg, e.x, e.y, SPRITE_SIZE, SPRITE_SIZE);
     } else {
       drawFallbackHeart(e.x, e.y, SPRITE_SIZE);
+    }
+    return;
+  }
+
+  if (e.type === 'hater') {
+    if (haterImg) {
+      image(haterImg, e.x, e.y, SPRITE_SIZE, SPRITE_SIZE);
+    } else {
+      drawFallbackHater(e.x, e.y, SPRITE_SIZE);
     }
     return;
   }
@@ -368,7 +373,9 @@ function drawHud() {
 function haterCount() {
   let n = 0;
   for (const e of entities) {
-    if (e.type === 'hater') n++;
+    // Revealed haters only — counting heart-stage ones would leak the
+    // roll before the reveal.
+    if (e.type === 'hater' && !e.isHeart) n++;
   }
   return n;
 }
@@ -548,7 +555,6 @@ function startNetwork() {
     myRegion = 0;
     playerRegions[peer.id] = 0;
     if (!viewInitialized) centerOnRegion(0);
-    seedHaters();
     challenge.nextAt = millis() + FIRST_CHALLENGE_DELAY_MS;
     connected = true;
   });
@@ -635,7 +641,6 @@ function goSolo() {
   localId = 'host';
   playerRegions[localId] = 0;
   if (!viewInitialized) centerOnRegion(0);
-  seedHaters();
   challenge.nextAt = millis() + FIRST_CHALLENGE_DELAY_MS;
   if (peer) {
     try { peer.destroy(); } catch (err) {}
@@ -848,44 +853,62 @@ function hostUpdate() {
 
 function updateHaters(step) {
   for (const e of entities) {
-    if (e.type !== 'hater') continue;
+    if (e.type !== 'hater' || e.isHeart) continue;
 
-    const flee = fleeTarget(e);
-    if (flee) {
-      const a = Math.atan2(e.y - flee.y, e.x - flee.x);
-      e.angle = a;
-      e.x += Math.cos(a) * HATER_FLEE_SPEED * step;
-      e.y += Math.sin(a) * HATER_FLEE_SPEED * step;
-    } else {
-      e.angle = (e.angle || 0) + random(-0.06, 0.06) * step;
-      e.x += Math.cos(e.angle) * HATER_BASE_SPEED * step;
-      e.y += Math.sin(e.angle) * HATER_BASE_SPEED * step;
-    }
+    // Haters wander gently and bounce inside the region they spawned
+    // in — they never run for the edges or cross a region border.
+    e.angle = (e.angle || 0) + random(-0.06, 0.06) * step;
+    e.x += Math.cos(e.angle) * HATER_BASE_SPEED * step;
+    e.y += Math.sin(e.angle) * HATER_BASE_SPEED * step;
 
-    e.x = wrapX(e.x);
-    e.y = wrapY(e.y);
+    bounceHaterInRegion(e);
+
     e.tx = e.x;
     e.ty = e.y;
   }
 }
 
-function fleeTarget(e) {
-  for (const id in playerViews) {
-    const v = playerViews[id];
-    const halfW = width / (2 * v.zoom);
-    const halfH = height / (2 * v.zoom);
-    if (Math.abs(e.x - v.x) < halfW && Math.abs(e.y - v.y) < halfH) {
-      return { x: v.x, y: v.y };
-    }
+// Haters steer with an angle instead of a velocity, so a wall hit
+// mirrors the heading. A hater without a region (should not happen)
+// falls back to the world torus.
+function bounceHaterInRegion(e) {
+  if (e.region === undefined || e.region === null) {
+    e.x = wrapX(e.x);
+    e.y = wrapY(e.y);
+    return;
   }
-  return null;
+
+  const b = regionBounds(e.region);
+  const pad = SPRITE_SIZE / 2;
+  const minX = b.x + pad;
+  const maxX = b.x + WORLD_WIDTH / 2 - pad;
+  const minY = b.y + pad;
+  const maxY = b.y + WORLD_HEIGHT / 2 - pad;
+
+  if (e.x < minX) {
+    e.x = minX;
+    e.angle = Math.PI - e.angle;
+  } else if (e.x > maxX) {
+    e.x = maxX;
+    e.angle = Math.PI - e.angle;
+  }
+
+  if (e.y < minY) {
+    e.y = minY;
+    e.angle = -e.angle;
+  } else if (e.y > maxY) {
+    e.y = maxY;
+    e.angle = -e.angle;
+  }
 }
 
 function updateCharacters(step, now) {
   const damp = Math.pow(MOVE_DAMPING, step);
 
   for (const e of entities) {
-    if (e.type === 'hater') continue;
+    // Revealed haters steer themselves in updateHaters; haters still in
+    // their heart stage are handled here like any other heart.
+    if (e.type === 'hater' && !e.isHeart) continue;
 
     const tilt = playerTilt[e.owner] || { x: 0, y: 0 };
     e.vx = ((e.vx || 0) + tilt.x * MOVE_GRAVITY * step) * damp;
@@ -948,7 +971,8 @@ function boundToRegion(e, region) {
 
 function checkInfections() {
   for (const h of entities) {
-    if (h.type !== 'hater') continue;
+    // A hater still in heart disguise infects nothing yet.
+    if (h.type !== 'hater' || h.isHeart) continue;
     for (const c of entities) {
       if (c.type === 'hater' || c.infected) continue;
       if (dist(h.x, h.y, c.x, c.y) <= INFECTION_RADIUS) {
@@ -958,32 +982,16 @@ function checkInfections() {
   }
 }
 
-function seedHaters() {
-  for (let i = 0; i < HATER_COUNT; i++) {
-    entities.push({
-      id: nextEntityId++,
-      type: 'hater',
-      x: random(WORLD_WIDTH),
-      y: random(WORLD_HEIGHT),
-      tx: 0,
-      ty: 0,
-      vx: 0,
-      vy: 0,
-      angle: random(TWO_PI),
-      isHeart: false,
-      infected: false,
-      color: null,
-    });
-  }
-  for (const e of entities) {
-    e.tx = e.x;
-    e.ty = e.y;
-  }
-}
-
 function spawnCharacter(x, y, color, owner) {
   if (entities.length >= MAX_ENTITIES) {
     showMessage('Entity limit reached');
+    return;
+  }
+
+  // The roll happens under the heart, same as the look pick: 1-in-4
+  // this icon is secretly the hater, otherwise one of the positives.
+  if (Math.random() < HATER_SPAWN_CHANCE) {
+    spawnHater(x, y, owner || localId);
     return;
   }
 
@@ -1001,6 +1009,32 @@ function spawnCharacter(x, y, color, owner) {
     isHeart: true,
     infected: false,
     color: color,
+    born: millis(),
+  });
+}
+
+// A hater born disguised as a heart. While isHeart is true it is
+// handled exactly like any other heart (tilt drift, region bounce,
+// the 2s transform); after the reveal it behaves like the seeded haters.
+function spawnHater(x, y, owner) {
+  entities.push({
+    id: nextEntityId++,
+    type: 'hater',
+    owner: owner,
+    // Stamped once so the hater bounces inside this region for its
+    // whole life, even if the owner later disconnects.
+    region: playerRegions[owner],
+    look: 0,
+    x: x,
+    y: y,
+    tx: x,
+    ty: y,
+    vx: 0,
+    vy: 0,
+    angle: random(TWO_PI),
+    isHeart: true,
+    infected: false,
+    color: null,
     born: millis(),
   });
 }
