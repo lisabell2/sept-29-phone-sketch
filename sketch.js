@@ -1,6 +1,10 @@
 // Numbers to tune
 const SENSOR_PROMPT_TEXT = 'Tap to start';
-const ROOM_ID = 'atelier-shared-world-4p';
+// Room id is version-stamped: bump it on ANY network protocol change.
+// v15 changed the SPAWN message without bumping this, so phones kept
+// joining a stale v14 host (an old tab holding the claim) — that host
+// auto-seeded haters and silently rejected the new spawn messages.
+const ROOM_ID = 'atelier-shared-world-4p-r2';
 const MAX_PLAYERS = 4;
 const WORLD_WIDTH = 2400;
 const WORLD_HEIGHT = 2400;
@@ -27,7 +31,7 @@ const MOVE_MAX_SPEED = 11;
 const MOVE_DAMPING = 0.995;
 const REGION_BOUNCE = 0.55;
 const LOOK_COUNT = 3;
-const BUILD_ID = 'v15';
+const BUILD_ID = 'v16';
 
 let goodPfps = [];
 let heartImg;

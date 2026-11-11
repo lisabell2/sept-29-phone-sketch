@@ -344,3 +344,12 @@ Scope delivered, per request: all 4 users add + remove sprites in only their own
 - Verified offline: 18-case logic simulation (burst composition/containment per region, 60k-step hater wander staying in-region while covering 800+px and moving >90% of frames, heart reveal at 2s, infection gated on reveal) plus a headless-Edge load check (`data-ok="true"` — 28 expected functions defined, 16 removed identifiers absent from global scope, braces balanced).
 - `BUILD_ID` → `'v15'`, `index.html` → `sketch.js?v=15`, bumped together.
 
+### Network Hotfix: Version-Isolated Rooms (v16)
+- **What broke after v15 shipped**: v15 changed the SPAWN protocol (the message no longer carries x/y — the host picks burst positions from the sender's region) but kept `ROOM_ID = 'atelier-shared-world-4p'`. Any device still running v14 in an open tab held the PeerJS host claim for that room, so a fresh v15 client joined the stale v14 host instead of a clean room. Both reported symptoms trace to that one cause:
+  - **"Haters are there from the start"** — v14 hosts auto-seed 6 haters at boot (`seedHaters()`), so the client inherited them the instant it connected.
+  - **"Can't add anything"** — the v14 host validates SPAWN with `regionAt(data.x, data.y)`, and v15 sends no coordinates, so `regionAt(undefined, undefined)` returns `NaN`, never equals the sender's region, and every spawn is silently dropped.
+- **Fix**: `ROOM_ID` → `'atelier-shared-world-4p-r2'` (with a comment at the declaration stating the bump rule). Old tabs keep the old claim for as long as they stay open, but new clients can no longer reach them — the first fresh tab claims `...-r2-host` and gets a clean, empty world. No gameplay or rendering code changed; SPAWN stays host-authoritative (client-sent coordinates are not coming back).
+- **Rule going forward**: bump `ROOM_ID` on any protocol change; bump `BUILD_ID` + `index.html` `?v=` together on every deploy.
+- Verified: headless-Edge load check (`data-ok="true"` — all 28 functions still defined, `ROOM_ID`/`BUILD_ID` read back correctly from global scope).
+- `BUILD_ID` → `'v16'`, `index.html` → `sketch.js?v=16`, bumped together.
+
