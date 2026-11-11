@@ -18,19 +18,21 @@ const INFECTION_RADIUS = 45;
 const KILL_HITBOX_RADIUS = 50;
 const COLOR_CHALLENGE_DURATION_SEC = 30;
 const COLOR_MATCH_THRESHOLD = 75;
-const CAM_WINDOW_WIDTH = 120;
-const CAM_WINDOW_HEIGHT = 90;
+const CHALLENGE_BANNER_TOP = 12;
+const CHALLENGE_BANNER_HEIGHT = 84;
+const CAM_WINDOW_WIDTH = 200;
+const CAM_WINDOW_HEIGHT = 150;
 const NETWORK_SYNC_RATE_MS = 66;
 const FIRST_CHALLENGE_DELAY_MS = 15000;
 const CHALLENGE_INTERVAL_MS = 45000;
-const TILT_RANGE = 30;
-const TILT_CURVE = 2.0;
+const TILT_RANGE = 25;
+const TILT_CURVE = 1.3;
 const VERTICAL_GRAVITY_MULT = 1.6;
-const MOVE_GRAVITY = 0.5;
-const MOVE_MAX_SPEED = 6;
-const MOVE_DAMPING = 0.985;
+const MOVE_GRAVITY = 1.6;
+const MOVE_MAX_SPEED = 11;
+const MOVE_DAMPING = 0.995;
 const LOOK_COUNT = 3;
-const BUILD_ID = 'v9';
+const BUILD_ID = 'v10';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -123,7 +125,7 @@ async function loadAssets() {
     const img = await tryLoad(file);
     if (img) goodPfps.push(img);
   }
-  heartImg = await tryLoad('character2.png');
+  heartImg = await tryLoad('nh.png');
   haterImg = await tryLoad('badpfp.png');
   mapImg = await tryLoad('map.png');
   imageMode(CENTER);
@@ -317,36 +319,41 @@ function drawFallbackHater(cx, cy, size) {
 }
 
 function drawHud() {
+  // While the find-color banner is up it owns the top of the screen,
+  // so the small status labels drop below it.
+  const topY = challenge.active ? CHALLENGE_BANNER_TOP + CHALLENGE_BANNER_HEIGHT + 8 : 10;
+
   noStroke();
   fill(20);
   textAlign(CENTER, TOP);
   textSize(16);
-  text('Your Region: ' + (myRegion < 0 ? '—' : myRegion), width / 2, 10);
+  text('Your Region: ' + (myRegion < 0 ? '—' : myRegion), width / 2, topY);
 
   textSize(12);
   fill(90);
-  text(connectionLabel(), width / 2, 32);
-  text('haters left: ' + haterCount(), width / 2, 50);
+  text(connectionLabel(), width / 2, topY + 22);
+  text('haters left: ' + haterCount(), width / 2, topY + 40);
 
   if (messageRemainingMs > 0) {
     fill(200, 60, 60);
     textSize(16);
-    text(message, width / 2, 70);
+    text(message, width / 2, topY + 60);
   }
 
   if (soloMode) {
     fill(160, 100, 0);
     textSize(12);
-    text('Solo mode — no room found', width / 2, 90);
+    text('Solo mode — no room found', width / 2, topY + 82);
   }
 
+  drawChallengeHud();
+
   // Always-on bottom-left readout so a stale deploy is obvious.
+  // Drawn last so the camera window can never cover it.
   fill(150);
   textAlign(LEFT, BOTTOM);
   textSize(11);
   text('fps: ' + frameRate().toFixed(0) + '  build: ' + BUILD_ID, 12, height - 8);
-
-  drawChallengeHud();
 }
 
 function haterCount() {
@@ -1017,23 +1024,7 @@ function camReady() {
 function drawChallengeHud() {
   if (!challenge.active) return;
 
-  const boxW = 220;
-  const boxH = 56;
-  const bx = width / 2 - boxW / 2;
-  const by = height - boxH - 12;
-
-  noStroke();
-  fill(255, 255, 255, 240);
-  rect(bx, by, boxW, boxH, 10);
-
-  fill(challenge.rgb[0], challenge.rgb[1], challenge.rgb[2]);
-  rect(bx + 10, by + 10, 36, 36, 6);
-
-  fill(20);
-  textAlign(LEFT, TOP);
-  textSize(14);
-  text('Find: ' + challenge.name.toUpperCase(), bx + 56, by + 10);
-  text(Math.ceil(challenge.remainingMs / 1000) + 's', bx + 56, by + 30);
+  drawChallengeBanner();
 
   imageMode(CORNER);
 
@@ -1041,32 +1032,91 @@ function drawChallengeHud() {
     const cw = CAM_WINDOW_WIDTH;
     const chh = CAM_WINDOW_HEIGHT;
     const cx = width - cw - 12;
-    const cy = 92;
+    const cy = height - chh - 12;
 
     camGfx.image(cam, 0, 0, cw, chh);
     image(camGfx, cx, cy, cw, chh);
 
-    scanButton = { x: cx, y: cy + chh + 6, w: cw, h: 28 };
+    // White frame plus a crosshair over the spot that gets sampled.
+    noFill();
+    stroke(255);
+    strokeWeight(3);
+    rect(cx, cy, cw, chh);
+    strokeWeight(2);
+    rect(cx + cw / 2 - 22, cy + chh / 2 - 22, 44, 44);
+    noStroke();
+
+    scanButton = { x: cx, y: cy - 42, w: cw, h: 30 };
   } else {
-    scanButton = { x: width - 132, y: 130, w: 120, h: 28 };
+    scanButton = { x: width - 152, y: height - 96, w: 140, h: 30 };
   }
 
   noStroke();
   fill(40, 130, 70);
-  rect(scanButton.x, scanButton.y, scanButton.w, scanButton.h, 8);
+  rect(scanButton.x, scanButton.y, scanButton.w, scanButton.h, 10);
   fill(255);
   textAlign(CENTER, CENTER);
-  textSize(14);
-  text('Scan', scanButton.x + scanButton.w / 2, scanButton.y + scanButton.h / 2);
-
-  if (camReady()) {
-    noFill();
-    stroke(255);
-    strokeWeight(2);
-    rect(scanButton.x + CAM_WINDOW_WIDTH / 2 - 20, 92 + CAM_WINDOW_HEIGHT / 2 - 20, 40, 40);
-  }
+  textStyle(BOLD);
+  textSize(18);
+  text('SCAN COLOR', scanButton.x + scanButton.w / 2, scanButton.y + scanButton.h / 2);
+  textStyle(NORMAL);
 
   imageMode(CENTER);
+}
+
+function drawChallengeBanner() {
+  const bannerW = Math.min(width - 24, 400);
+  const bannerH = CHALLENGE_BANNER_HEIGHT;
+  const bx = (width - bannerW) / 2;
+  const by = CHALLENGE_BANNER_TOP;
+
+  const secs = Math.ceil(challenge.remainingMs / 1000);
+  const label = 'FIND ' + challenge.name.toUpperCase();
+  const countdown = secs + 's LEFT';
+
+  // Card with a soft shadow.
+  noStroke();
+  fill(0, 0, 0, 45);
+  rect(bx + 3, by + 4, bannerW, bannerH, 18);
+  fill(255, 255, 255, 248);
+  stroke(25);
+  strokeWeight(2);
+  rect(bx, by, bannerW, bannerH, 18);
+
+  // Color swatch.
+  const swatch = 52;
+  const sx = bx + 14;
+  const sy = by + (bannerH - swatch) / 2;
+  fill(challenge.rgb[0], challenge.rgb[1], challenge.rgb[2]);
+  rect(sx, sy, swatch, swatch, 12);
+  noStroke();
+
+  const tx = sx + swatch + 16;
+  const maxTextW = bannerW - (tx - bx) - 14;
+
+  fill(20);
+  textAlign(LEFT, CENTER);
+  textStyle(BOLD);
+  fitTextSize(label, maxTextW, 30);
+  text(label, tx, by + bannerH / 2 - 15);
+
+  const urgent = secs <= 10;
+  fill(urgent ? color(205, 30, 30) : 90);
+  fitTextSize(countdown, maxTextW, 24);
+  text(countdown, tx, by + bannerH / 2 + 15);
+  textStyle(NORMAL);
+}
+
+// Shrinks the text size until the label fits maxW. Call after textStyle()
+// so measurement matches what gets drawn.
+function fitTextSize(label, maxW, startSize) {
+  let size = startSize;
+  textSize(size);
+  while (size > 16 && textWidth(label) > maxW) {
+    size -= 2;
+    textSize(size);
+  }
+  return size;
 }
 
 function hitScanButton(mx, my) {
