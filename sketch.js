@@ -39,8 +39,9 @@ const VERTICAL_GRAVITY_MULT = 1.6;
 const MOVE_GRAVITY = 1.6;
 const MOVE_MAX_SPEED = 11;
 const MOVE_DAMPING = 0.995;
+const REGION_BOUNCE = 0.55;
 const LOOK_COUNT = 3;
-const BUILD_ID = 'v13';
+const BUILD_ID = 'v14';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -897,14 +898,51 @@ function updateCharacters(step, now) {
       e.vy = (e.vy / speed) * maxSpeed;
     }
 
-    e.x = wrapX(e.x + e.vx);
-    e.y = wrapY(e.y + e.vy);
+    e.x += e.vx;
+    e.y += e.vy;
+
+    // Characters tilt around freely but never leave their owner's
+    // region: they bounce off its walls instead of crossing over.
+    // (Haters keep roaming the whole torus.)
+    const region = playerRegions[e.owner];
+    if (region !== undefined) {
+      boundToRegion(e, region);
+    } else {
+      e.x = wrapX(e.x);
+      e.y = wrapY(e.y);
+    }
+
     e.tx = e.x;
     e.ty = e.y;
 
     if (e.isHeart && now - e.born >= HEART_TRANSFORM_MS) {
       e.isHeart = false;
     }
+  }
+}
+
+function boundToRegion(e, region) {
+  const b = regionBounds(region);
+  const pad = SPRITE_SIZE / 2;
+  const minX = b.x + pad;
+  const maxX = b.x + WORLD_WIDTH / 2 - pad;
+  const minY = b.y + pad;
+  const maxY = b.y + WORLD_HEIGHT / 2 - pad;
+
+  if (e.x < minX) {
+    e.x = minX;
+    e.vx = Math.abs(e.vx || 0) * REGION_BOUNCE;
+  } else if (e.x > maxX) {
+    e.x = maxX;
+    e.vx = -Math.abs(e.vx || 0) * REGION_BOUNCE;
+  }
+
+  if (e.y < minY) {
+    e.y = minY;
+    e.vy = Math.abs(e.vy || 0) * REGION_BOUNCE;
+  } else if (e.y > maxY) {
+    e.y = maxY;
+    e.vy = -Math.abs(e.vy || 0) * REGION_BOUNCE;
   }
 }
 

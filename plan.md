@@ -327,3 +327,11 @@ Scope delivered, per request: all 4 users add + remove sprites in only their own
 - Verified offline in a JS runtime (no browser tooling this session): 25-case suite covering the reported bug — gray-metered white `[150,150,150]`, darker `[120,120,120]`, warm-tinted white `[190,175,155]` all now match white; badly underexposed `[90,90,90]` correctly still fails; white/gray walls correctly fail red/black/green targets; dim and overexposed colored samples (red `[140,30,30]` / `[255,120,120]`, etc.) match their colors. All 25 passed. Plus brace/paren balance and a served-file syntax check.
 - `BUILD_ID` → `'v13'`, `index.html` → `sketch.js?v=13`, bumped together.
 
+### Gameplay Pass 7: Characters Bounce Inside Their Own Region (v14)
+- Re-applied (from the reverted v11 pass, unchanged): `updateCharacters()` no longer torus-wraps player characters. When `playerRegions[e.owner]` is known, `boundToRegion()` clamps the position to the owner's 1200×1200 quadrant — inset by `SPRITE_SIZE / 2` so sprites stay fully inside — and reflects velocity off the wall at `REGION_BOUNCE = 0.55`. Tilt feel is untouched: they still accelerate, glide, and rest against the wall while the phone is held tilted, and bounce off when it levels out. Characters can never cross into another player's quadrant.
+- Haters are unchanged and keep roaming/wrapping the full 2400×2400 torus (they have no owner region and are the shared threat that wanders into everyone's space).
+- Orphaned characters (owner disconnected, so `playerRegions[e.owner]` is deleted by `removePlayer()`) fall back to torus wrap — they have no tilt source, so they simply sit where they were.
+- New constant `REGION_BOUNCE`; new function `boundToRegion()`; no protocol changes (region lookup is host-side only).
+- Verified via headless-Edge load check (`data-ok="true"`, all functions defined including `boundToRegion`).
+- `BUILD_ID` → `'v14'`, `index.html` → `sketch.js?v=14`, bumped together.
+
