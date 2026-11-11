@@ -11,28 +11,14 @@ const DOUBLE_TAP_MAX_DISTANCE = 25;
 const HEART_TRANSFORM_MS = 2000;
 const SPRITE_SIZE = 70;
 const MAX_ENTITIES = 100;
-const HATER_COUNT = 6;
 const HATER_BASE_SPEED = 1.5;
-const HATER_FLEE_SPEED = 4.0;
+// One double-tap spawns this many icons (3 friends + 1 hater by
+// default) at random spots inside the tapping player's region.
+const SPAWN_BURST_SIZE = 4;
+const SPAWN_HATERS_PER_BURST = 1;
 const INFECTION_RADIUS = 45;
 const KILL_HITBOX_RADIUS = 50;
-const COLOR_CHALLENGE_DURATION_SEC = 30;
-const COLOR_MATCH_THRESHOLD = 75;
-// Perception-based matching tolerances (see colorMatches): phones
-// auto-expose and auto-white-balance, so brightness is unreliable.
-const COLOR_HUE_TOLERANCE_DEG = 35;
-const COLOR_SAT_MIN = 0.18;
-const COLOR_LIGHTNESS_TOLERANCE = 0.25;
-const COLOR_ACHROMATIC_SAT_MAX = 0.22;
-const COLOR_WHITE_LUM_MIN = 0.4;
-const COLOR_BLACK_LUM_MAX = 0.38;
-const CHALLENGE_BANNER_TOP = 12;
-const CHALLENGE_BANNER_HEIGHT = 84;
-const CAM_WINDOW_WIDTH = 200;
-const CAM_WINDOW_HEIGHT = 150;
 const NETWORK_SYNC_RATE_MS = 66;
-const FIRST_CHALLENGE_DELAY_MS = 30000;
-const CHALLENGE_INTERVAL_MS = 45000;
 const TILT_RANGE = 25;
 const TILT_CURVE = 1.3;
 const VERTICAL_GRAVITY_MULT = 1.6;
@@ -41,29 +27,12 @@ const MOVE_MAX_SPEED = 11;
 const MOVE_DAMPING = 0.995;
 const REGION_BOUNCE = 0.55;
 const LOOK_COUNT = 3;
-const BUILD_ID = 'v14';
-
-const COLORS = [
-  { name: 'red', rgb: [220, 40, 40] },
-  { name: 'orange', rgb: [240, 140, 30] },
-  { name: 'yellow', rgb: [235, 210, 40] },
-  { name: 'green', rgb: [50, 160, 70] },
-  { name: 'blue', rgb: [50, 90, 210] },
-  { name: 'purple', rgb: [130, 60, 190] },
-  { name: 'pink', rgb: [235, 110, 170] },
-  { name: 'brown', rgb: [130, 85, 55] },
-  { name: 'white', rgb: [240, 240, 240] },
-  { name: 'black', rgb: [35, 35, 35] },
-];
+const BUILD_ID = 'v15';
 
 let goodPfps = [];
 let heartImg;
 let haterImg;
 let mapImg;
-
-let cam;
-let camGfx;
-let cameraRequested = false;
 
 let entities = [];
 let nextEntityId = 1;
@@ -99,17 +68,8 @@ const playerRegions = {};
 const playerTilt = {};
 const playerViews = {};
 
-let challenge = {
-  active: false,
-  name: '',
-  rgb: [0, 0, 0],
-  remainingMs: 0,
-  nextAt: 0,
-};
-
 let message = '';
 let messageRemainingMs = 0;
-let scanButton = { x: 0, y: 0, w: 0, h: 0 };
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -118,13 +78,7 @@ function setup() {
   showDesktopQr({ label: 'Scan to open on your phone' });
   requestWakeLock();
   loadAssets();
-  camGfx = createGraphics(CAM_WINDOW_WIDTH, CAM_WINDOW_HEIGHT);
-  camGfx.pixelDensity(1);
   startNetwork();
-}
-
-function userSetupComplete() {
-  ensureCamera();
 }
 
 async function loadAssets() {
@@ -255,20 +209,22 @@ function drawEntities() {
 }
 
 function drawSprite(e) {
-  if (e.type === 'hater') {
-    if (haterImg) {
-      image(haterImg, e.x, e.y, SPRITE_SIZE, SPRITE_SIZE);
-    } else {
-      drawFallbackHater(e.x, e.y, SPRITE_SIZE);
-    }
-    return;
-  }
-
+  // Everything spawns as a heart first — haters included — so the
+  // heart check comes before the type check.
   if (e.isHeart) {
     if (heartImg) {
       image(heartImg, e.x, e.y, SPRITE_SIZE, SPRITE_SIZE);
     } else {
       drawFallbackHeart(e.x, e.y, SPRITE_SIZE);
+    }
+    return;
+  }
+
+  if (e.type === 'hater') {
+    if (haterImg) {
+      image(haterImg, e.x, e.y, SPRITE_SIZE, SPRITE_SIZE);
+    } else {
+      drawFallbackHater(e.x, e.y, SPRITE_SIZE);
     }
     return;
   }
@@ -328,9 +284,7 @@ function drawFallbackHater(cx, cy, size) {
 }
 
 function drawHud() {
-  // While the find-color banner is up it owns the top of the screen,
-  // so the small status labels drop below it.
-  const topY = challenge.active ? CHALLENGE_BANNER_TOP + CHALLENGE_BANNER_HEIGHT + 8 : 10;
+  const topY = 10;
 
   noStroke();
   fill(20);
@@ -341,7 +295,7 @@ function drawHud() {
   textSize(12);
   fill(90);
   text(connectionLabel(), width / 2, topY + 22);
-  text('haters left: ' + haterCount(), width / 2, topY + 40);
+  text('haters: ' + haterCount(), width / 2, topY + 40);
 
   if (messageRemainingMs > 0) {
     fill(200, 60, 60);
@@ -355,10 +309,7 @@ function drawHud() {
     text('Solo mode — no room found', width / 2, topY + 82);
   }
 
-  drawChallengeHud();
-
   // Always-on bottom-left readout so a stale deploy is obvious.
-  // Drawn last so the camera window can never cover it.
   fill(150);
   textAlign(LEFT, BOTTOM);
   textSize(11);
@@ -383,13 +334,6 @@ function connectionLabel() {
 // ---------- input ----------
 
 function mousePressed() {
-  ensureCamera();
-
-  if (challenge.active && hitScanButton(mouseX, mouseY)) {
-    onScanPressed();
-    return false;
-  }
-
   pressX = mouseX;
   pressY = mouseY;
   lastDragX = mouseX;
@@ -509,7 +453,9 @@ function onDoubleTap(sx, sy) {
     return;
   }
 
-  requestSpawn(wrapX(w.x), wrapY(w.y));
+  // The tap itself is just the trigger — the host scatters a burst of
+  // icons at random spots inside your region.
+  requestSpawn();
 }
 
 function findKillTarget(wx, wy) {
@@ -548,8 +494,6 @@ function startNetwork() {
     myRegion = 0;
     playerRegions[peer.id] = 0;
     if (!viewInitialized) centerOnRegion(0);
-    seedHaters();
-    challenge.nextAt = millis() + FIRST_CHALLENGE_DELAY_MS;
     connected = true;
   });
 
@@ -635,8 +579,6 @@ function goSolo() {
   localId = 'host';
   playerRegions[localId] = 0;
   if (!viewInitialized) centerOnRegion(0);
-  seedHaters();
-  challenge.nextAt = millis() + FIRST_CHALLENGE_DELAY_MS;
   if (peer) {
     try { peer.destroy(); } catch (err) {}
   }
@@ -676,20 +618,22 @@ function sendToHost(msg) {
 }
 
 function handleLocal(msg) {
-  if (msg.type === 'SPAWN') spawnCharacter(msg.x, msg.y, null, localId);
+  if (msg.type === 'SPAWN') spawnBurst(myRegion, localId);
   if (msg.type === 'KILL') {
     const target = findEntity(msg.id);
     if (target && regionAt(target.x, target.y) === myRegion) killEntity(msg.id);
   }
-  if (msg.type === 'SCAN' && msg.success) hostWipeHaters();
 }
 
 function handleHostData(conn, data) {
   if (!data || !data.type) return;
 
   if (data.type === 'SPAWN') {
-    if (playerRegions[conn.peer] === regionAt(data.x, data.y)) {
-      spawnCharacter(data.x, data.y, null, conn.peer);
+    // The host picks all burst positions, so a client can only ever
+    // add icons inside its own region.
+    const region = playerRegions[conn.peer];
+    if (region !== undefined) {
+      spawnBurst(region, conn.peer);
     }
   } else if (data.type === 'KILL') {
     // A client may only remove things sitting inside its own region.
@@ -700,8 +644,6 @@ function handleHostData(conn, data) {
   } else if (data.type === 'VIEW') {
     playerViews[conn.peer] = data;
     playerTilt[conn.peer] = data.tilt;
-  } else if (data.type === 'SCAN') {
-    if (data.success) hostWipeHaters();
   }
 }
 
@@ -729,12 +671,6 @@ function handleClientData(data) {
 function hostState() {
   return {
     entities: entities,
-    challenge: {
-      active: challenge.active,
-      name: challenge.name,
-      rgb: challenge.rgb,
-      remainingMs: challenge.remainingMs,
-    },
     regions: playerRegions,
     message: message,
     messageRemainingMs: messageRemainingMs,
@@ -742,7 +678,7 @@ function hostState() {
 }
 
 function applyState(state, snap) {
-  if (!state || !state.challenge) return;
+  if (!state) return;
 
   const incoming = state.entities || [];
   const next = [];
@@ -757,6 +693,7 @@ function applyState(state, snap) {
       existing.type = e.type;
       existing.owner = e.owner;
       existing.look = e.look;
+      existing.region = e.region;
       next.push(existing);
     } else {
       next.push({
@@ -764,6 +701,7 @@ function applyState(state, snap) {
         type: e.type,
         owner: e.owner,
         look: e.look,
+        region: e.region,
         x: e.x,
         y: e.y,
         tx: e.x,
@@ -776,10 +714,6 @@ function applyState(state, snap) {
   }
 
   entities = next;
-  challenge.active = state.challenge.active;
-  challenge.name = state.challenge.name;
-  challenge.rgb = state.challenge.rgb;
-  challenge.remainingMs = state.challenge.remainingMs;
 
   // Keep a local message alive even when the host has nothing to say.
   if (state.messageRemainingMs > 0) {
@@ -840,45 +774,64 @@ function hostUpdate() {
   const dt = constrain(deltaTime / (1000 / 60), 0.25, 3);
   const now = millis();
 
-  updateHaters(dt);
+  updateHaters(dt, now);
   updateCharacters(dt, now);
   checkInfections();
-  updateChallenge(now);
 }
 
-function updateHaters(step) {
+function updateHaters(step, now) {
   for (const e of entities) {
     if (e.type !== 'hater') continue;
 
-    const flee = fleeTarget(e);
-    if (flee) {
-      const a = Math.atan2(e.y - flee.y, e.x - flee.x);
-      e.angle = a;
-      e.x += Math.cos(a) * HATER_FLEE_SPEED * step;
-      e.y += Math.sin(a) * HATER_FLEE_SPEED * step;
-    } else {
-      e.angle = (e.angle || 0) + random(-0.06, 0.06) * step;
-      e.x += Math.cos(e.angle) * HATER_BASE_SPEED * step;
-      e.y += Math.sin(e.angle) * HATER_BASE_SPEED * step;
-    }
+    // Haters no longer flee toward the edges of the world — they
+    // wander gently and bounce inside the region they spawned in,
+    // exactly like the positive icons.
+    e.angle = (e.angle || 0) + random(-0.06, 0.06) * step;
+    e.x += Math.cos(e.angle) * HATER_BASE_SPEED * step;
+    e.y += Math.sin(e.angle) * HATER_BASE_SPEED * step;
 
-    e.x = wrapX(e.x);
-    e.y = wrapY(e.y);
+    bounceHater(e);
+
     e.tx = e.x;
     e.ty = e.y;
+
+    if (e.isHeart && now - e.born >= HEART_TRANSFORM_MS) {
+      e.isHeart = false;
+    }
   }
 }
 
-function fleeTarget(e) {
-  for (const id in playerViews) {
-    const v = playerViews[id];
-    const halfW = width / (2 * v.zoom);
-    const halfH = height / (2 * v.zoom);
-    if (Math.abs(e.x - v.x) < halfW && Math.abs(e.y - v.y) < halfH) {
-      return { x: v.x, y: v.y };
-    }
+// Haters are region-bound like the good icons, but they steer with an
+// angle instead of a velocity, so a wall hit mirrors the heading.
+function bounceHater(e) {
+  if (e.region === undefined || e.region === null) {
+    e.x = wrapX(e.x);
+    e.y = wrapY(e.y);
+    return;
   }
-  return null;
+
+  const b = regionBounds(e.region);
+  const pad = SPRITE_SIZE / 2;
+  const minX = b.x + pad;
+  const maxX = b.x + WORLD_WIDTH / 2 - pad;
+  const minY = b.y + pad;
+  const maxY = b.y + WORLD_HEIGHT / 2 - pad;
+
+  if (e.x < minX) {
+    e.x = minX;
+    e.angle = Math.PI - e.angle;
+  } else if (e.x > maxX) {
+    e.x = maxX;
+    e.angle = Math.PI - e.angle;
+  }
+
+  if (e.y < minY) {
+    e.y = minY;
+    e.angle = -e.angle;
+  } else if (e.y > maxY) {
+    e.y = maxY;
+    e.angle = -e.angle;
+  }
 }
 
 function updateCharacters(step, now) {
@@ -949,6 +902,8 @@ function boundToRegion(e, region) {
 function checkInfections() {
   for (const h of entities) {
     if (h.type !== 'hater') continue;
+    // Haters only infect once their heart disguise drops.
+    if (h.isHeart) continue;
     for (const c of entities) {
       if (c.type === 'hater' || c.infected) continue;
       if (dist(h.x, h.y, c.x, c.y) <= INFECTION_RADIUS) {
@@ -958,27 +913,52 @@ function checkInfections() {
   }
 }
 
-function seedHaters() {
-  for (let i = 0; i < HATER_COUNT; i++) {
-    entities.push({
-      id: nextEntityId++,
-      type: 'hater',
-      x: random(WORLD_WIDTH),
-      y: random(WORLD_HEIGHT),
-      tx: 0,
-      ty: 0,
-      vx: 0,
-      vy: 0,
-      angle: random(TWO_PI),
-      isHeart: false,
-      infected: false,
-      color: null,
-    });
+// One double-tap = a burst of icons at random spots inside the tapping
+// player's region. Mostly friends plus one hater — everything starts
+// as a heart, so the hater is a surprise reveal after 2s.
+function spawnBurst(region, owner) {
+  if (region === undefined || region < 0) return;
+
+  for (let i = 0; i < SPAWN_BURST_SIZE; i++) {
+    const p = randomPointInRegion(region);
+    if (i < SPAWN_HATERS_PER_BURST) {
+      spawnHater(p.x, p.y, region);
+    } else {
+      spawnCharacter(p.x, p.y, null, owner);
+    }
   }
-  for (const e of entities) {
-    e.tx = e.x;
-    e.ty = e.y;
-  }
+}
+
+function randomPointInRegion(region) {
+  const b = regionBounds(region);
+  const pad = SPRITE_SIZE / 2 + 12;
+  return {
+    x: random(b.x + pad, b.x + WORLD_WIDTH / 2 - pad),
+    y: random(b.y + pad, b.y + WORLD_HEIGHT / 2 - pad),
+  };
+}
+
+function spawnHater(x, y, region) {
+  if (entities.length >= MAX_ENTITIES) return;
+
+  entities.push({
+    id: nextEntityId++,
+    type: 'hater',
+    owner: null,
+    look: 0,
+    region: region,
+    x: x,
+    y: y,
+    tx: x,
+    ty: y,
+    vx: 0,
+    vy: 0,
+    angle: random(TWO_PI),
+    isHeart: true,
+    infected: false,
+    color: null,
+    born: millis(),
+  });
 }
 
 function spawnCharacter(x, y, color, owner) {
@@ -1011,278 +991,6 @@ function killEntity(id) {
   return entities.length !== before;
 }
 
-function hostWipeHaters() {
-  entities = entities.filter((e) => e.type !== 'hater');
-  challenge.active = false;
-  challenge.remainingMs = 0;
-  challenge.nextAt = millis() + CHALLENGE_INTERVAL_MS;
-  showMessage('All haters wiped!');
-}
-
-function updateChallenge(now) {
-  if (challenge.active) {
-    challenge.remainingMs = Math.max(0, challenge.remainingMs - deltaTime);
-    if (challenge.remainingMs <= 0) {
-      challenge.active = false;
-      challenge.nextAt = now + CHALLENGE_INTERVAL_MS;
-      showMessage('Challenge missed');
-    }
-    return;
-  }
-
-  if (now >= challenge.nextAt && challenge.nextAt !== 0) {
-    const c = COLORS[Math.floor(random(COLORS.length))];
-    challenge.active = true;
-    challenge.name = c.name;
-    challenge.rgb = c.rgb;
-    challenge.remainingMs = COLOR_CHALLENGE_DURATION_SEC * 1000;
-  }
-}
-
-// ---------- camera challenge ----------
-
-function ensureCamera() {
-  if (cameraRequested || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
-
-  cameraRequested = true;
-
-  try {
-    cam = createCapture({ video: { facingMode: { ideal: 'environment' } }, audio: false });
-    cam.size(CAM_WINDOW_WIDTH, CAM_WINDOW_HEIGHT);
-    cam.hide();
-  } catch (err) {
-    cam = null;
-    cameraRequested = false;
-    return;
-  }
-
-  // "No error callback" is a p5 fact of life: if no frames arrive,
-  // allow a later tap to try again instead of staying dead forever.
-  setTimeout(() => {
-    if (!camReady()) cameraRequested = false;
-  }, 6000);
-}
-
-function camReady() {
-  return !!(cam && cam.elt && cam.elt.videoWidth > 0);
-}
-
-function drawChallengeHud() {
-  if (!challenge.active) return;
-
-  drawChallengeBanner();
-
-  imageMode(CORNER);
-
-  // The scan window sits at the bottom-center of the screen, with the
-  // button right above it.
-  const cw = CAM_WINDOW_WIDTH;
-  const chh = CAM_WINDOW_HEIGHT;
-  const cx = width / 2 - cw / 2;
-  const cy = height - chh - 12;
-
-  if (camReady()) {
-    camGfx.image(cam, 0, 0, cw, chh);
-    image(camGfx, cx, cy, cw, chh);
-
-    // White frame plus a crosshair over the spot that gets sampled.
-    noFill();
-    stroke(255);
-    strokeWeight(3);
-    rect(cx, cy, cw, chh);
-    strokeWeight(2);
-    rect(cx + cw / 2 - 22, cy + chh / 2 - 22, 44, 44);
-    noStroke();
-  }
-
-  // Same spot whether or not the camera has started, so the button never
-  // jumps around when the feed comes alive.
-  scanButton = { x: cx, y: cy - 42, w: cw, h: 30 };
-
-  noStroke();
-  fill(40, 130, 70);
-  rect(scanButton.x, scanButton.y, scanButton.w, scanButton.h, 10);
-  fill(255);
-  textAlign(CENTER, CENTER);
-  textStyle(BOLD);
-  textSize(18);
-  text('SCAN COLOR', scanButton.x + scanButton.w / 2, scanButton.y + scanButton.h / 2);
-  textStyle(NORMAL);
-
-  imageMode(CENTER);
-}
-
-function drawChallengeBanner() {
-  const bannerW = Math.min(width - 24, 400);
-  const bannerH = CHALLENGE_BANNER_HEIGHT;
-  const bx = (width - bannerW) / 2;
-  const by = CHALLENGE_BANNER_TOP;
-
-  const secs = Math.ceil(challenge.remainingMs / 1000);
-  const label = 'FIND ' + challenge.name.toUpperCase();
-  const countdown = secs + 's LEFT';
-
-  // Card with a soft shadow.
-  noStroke();
-  fill(0, 0, 0, 45);
-  rect(bx + 3, by + 4, bannerW, bannerH, 18);
-  fill(255, 255, 255, 248);
-  stroke(25);
-  strokeWeight(2);
-  rect(bx, by, bannerW, bannerH, 18);
-
-  // Color swatch.
-  const swatch = 52;
-  const sx = bx + 14;
-  const sy = by + (bannerH - swatch) / 2;
-  fill(challenge.rgb[0], challenge.rgb[1], challenge.rgb[2]);
-  rect(sx, sy, swatch, swatch, 12);
-  noStroke();
-
-  const tx = sx + swatch + 16;
-  const maxTextW = bannerW - (tx - bx) - 14;
-
-  fill(20);
-  textAlign(LEFT, CENTER);
-  textStyle(BOLD);
-  fitTextSize(label, maxTextW, 30);
-  text(label, tx, by + bannerH / 2 - 15);
-
-  const urgent = secs <= 10;
-  fill(urgent ? color(205, 30, 30) : 90);
-  fitTextSize(countdown, maxTextW, 24);
-  text(countdown, tx, by + bannerH / 2 + 15);
-  textStyle(NORMAL);
-}
-
-// Shrinks the text size until the label fits maxW. Call after textStyle()
-// so measurement matches what gets drawn.
-function fitTextSize(label, maxW, startSize) {
-  let size = startSize;
-  textSize(size);
-  while (size > 16 && textWidth(label) > maxW) {
-    size -= 2;
-    textSize(size);
-  }
-  return size;
-}
-
-function hitScanButton(mx, my) {
-  return mx >= scanButton.x && mx <= scanButton.x + scanButton.w &&
-         my >= scanButton.y && my <= scanButton.y + scanButton.h;
-}
-
-function onScanPressed() {
-  ensureCamera();
-  const sampled = sampleCameraColor();
-
-  if (!sampled) {
-    showMessage(cam ? 'Camera starting — try again' : 'Camera not available');
-    return;
-  }
-
-  if (colorMatches(sampled, challenge.rgb)) {
-    sendToHost({ type: 'SCAN', success: true });
-    showMessage('Color found!');
-  } else {
-    // Report what the camera actually saw — phones under auto-exposure
-    // render white as gray, and this readout makes that visible.
-    showMessage(
-      'No match — saw ' +
-        Math.round(sampled[0]) + ', ' +
-        Math.round(sampled[1]) + ', ' +
-        Math.round(sampled[2])
-    );
-  }
-}
-
-function sampleCameraColor() {
-  if (!camReady() || !camGfx) return null;
-
-  camGfx.image(cam, 0, 0, CAM_WINDOW_WIDTH, CAM_WINDOW_HEIGHT);
-  camGfx.loadPixels();
-
-  const px = camGfx.pixels;
-  if (!px || px.length === 0) return null;
-
-  const cx = Math.floor(CAM_WINDOW_WIDTH / 2);
-  const cy = Math.floor(CAM_WINDOW_HEIGHT / 2);
-  const r = 8;
-  let rr = 0;
-  let gg = 0;
-  let bb = 0;
-  let n = 0;
-
-  for (let y = cy - r; y < cy + r; y++) {
-    for (let x = cx - r; x < cx + r; x++) {
-      const i = 4 * (y * CAM_WINDOW_WIDTH + x);
-      if (i + 3 >= px.length) continue;
-      if (px[i + 3] === 0) continue;
-      rr += px[i];
-      gg += px[i + 1];
-      bb += px[i + 2];
-      n++;
-    }
-  }
-
-  if (n === 0) return null;
-  return [rr / n, gg / n, bb / n];
-}
-
-// Exposure-tolerant color matching. A phone camera meters a white wall
-// down to pale gray and tints colors with auto-white-balance, so raw RGB
-// distance alone fails on exactly the surfaces people scan. Fast path:
-// the classic RGB distance. Slow path: compare hue + saturation +
-// lightness, which survives brightness drift.
-function colorMatches(sampled, target) {
-  const rawD = dist(sampled[0], sampled[1], sampled[2], target[0], target[1], target[2]);
-  if (rawD <= COLOR_MATCH_THRESHOLD) return true;
-
-  const s = rgbToHsl(sampled[0], sampled[1], sampled[2]);
-  const t = rgbToHsl(target[0], target[1], target[2]);
-
-  // White / black targets carry no hue: accept anything still colorless
-  // that lands on the right half of the brightness range.
-  if (t[1] < COLOR_ACHROMATIC_SAT_MAX) {
-    if (s[1] > COLOR_ACHROMATIC_SAT_MAX) return false;
-    return t[2] >= 0.5 ? s[2] >= COLOR_WHITE_LUM_MIN : s[2] <= COLOR_BLACK_LUM_MAX;
-  }
-
-  // Colored target: match the hue, require real saturation (a gray wall
-  // must not match), and allow wide brightness drift from auto-exposure.
-  return (
-    s[1] >= COLOR_SAT_MIN &&
-    hueDistanceDeg(s[0], t[0]) <= COLOR_HUE_TOLERANCE_DEG &&
-    Math.abs(s[2] - t[2]) <= COLOR_LIGHTNESS_TOLERANCE
-  );
-}
-
-function rgbToHsl(r, g, b) {
-  const rr = r / 255;
-  const gg = g / 255;
-  const bb = b / 255;
-  const max = Math.max(rr, gg, bb);
-  const min = Math.min(rr, gg, bb);
-  const lum = (max + min) / 2;
-  let hueDeg = 0;
-  let sat = 0;
-  const d = max - min;
-
-  if (d > 0.0001) {
-    sat = lum > 0.5 ? d / (2 - max - min) : d / (max + min);
-    if (max === rr) hueDeg = 60 * (((gg - bb) / d) % 6);
-    else if (max === gg) hueDeg = 60 * ((bb - rr) / d + 2);
-    else hueDeg = 60 * ((rr - gg) / d + 4);
-  }
-  if (hueDeg < 0) hueDeg += 360;
-  return [hueDeg, sat, lum];
-}
-
-function hueDistanceDeg(a, b) {
-  const d = Math.abs(a - b) % 360;
-  return d > 180 ? 360 - d : d;
-}
-
 // ---------- shared helpers ----------
 
 function centerOnRegion(r) {
@@ -1305,8 +1013,8 @@ function curveTilt(degrees) {
   return Math.sign(normalized) * Math.pow(Math.abs(normalized), TILT_CURVE);
 }
 
-function requestSpawn(x, y) {
-  sendToHost({ type: 'SPAWN', x: x, y: y });
+function requestSpawn() {
+  sendToHost({ type: 'SPAWN' });
 }
 
 function requestKill(id) {
