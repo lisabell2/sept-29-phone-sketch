@@ -309,3 +309,10 @@ Scope delivered, per request: all 4 users add + remove sprites in only their own
 - Verified locally with a faked capture element (real getUserMedia still denied in the test browser): nh.png loads as the heart; 20 frames of half-tilt ramps speed 0→11 with a 148px drift; the banner renders at the top (swatch pixel exact-match to the target RGB, card white, dark text confirmed by pixel counts), the 200×150 preview at bottom-right, scan button green above it; a forced scan against a solid-red feed still matches at distance ≈28 (< 75) and reports "Color found!". No console errors on load or during the challenge.
 - `BUILD_ID` → `'v10'`, `index.html` → `sketch.js?v=10`, bumped together.
 
+### Layout Tweak: Scan Window Bottom-Center (v12)
+*(v11 — the per-player challenges / region walls / hater re-seed pass — was deployed briefly and then reverted in `d711f3c`, so it is not part of this build's code.)*
+- The camera preview moved from the bottom-right corner to the **bottom-center** of the screen (`cx = width/2 − cw/2`, still 12px off the bottom edge), with the SCAN COLOR button directly above it. The button keeps the same spot whether or not the camera feed has started, so it no longer jumps when the camera comes alive.
+- **Version jumped to `v12`, not `v11`**: `?v=11` URLs were already served and cached with the reverted pass's code during its brief deploy, so reusing the tag would let stale phone caches win. A fresh `?v=12` also force-redownloads the sketch on every phone.
+- Post-mortem on "the color challenge disappeared from mobile": the live site was verified serving correct v10 after the revert — the symptom was deploy-cache skew (a phone still running cached v11 client code ignores a v10 host's single-`challenge` state field, so everything else syncs but no banner ever appears). The `build:` readout bottom-left confirms which version a phone is actually running; the `?v=12` bump clears the skew on its own.
+- `BUILD_ID` → `'v12'`, `index.html` → `sketch.js?v=12`, bumped together.
+

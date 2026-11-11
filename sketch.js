@@ -32,7 +32,7 @@ const MOVE_GRAVITY = 1.6;
 const MOVE_MAX_SPEED = 11;
 const MOVE_DAMPING = 0.995;
 const LOOK_COUNT = 3;
-const BUILD_ID = 'v10';
+const BUILD_ID = 'v12';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -1028,12 +1028,14 @@ function drawChallengeHud() {
 
   imageMode(CORNER);
 
-  if (camReady()) {
-    const cw = CAM_WINDOW_WIDTH;
-    const chh = CAM_WINDOW_HEIGHT;
-    const cx = width - cw - 12;
-    const cy = height - chh - 12;
+  // The scan window sits at the bottom-center of the screen, with the
+  // button right above it.
+  const cw = CAM_WINDOW_WIDTH;
+  const chh = CAM_WINDOW_HEIGHT;
+  const cx = width / 2 - cw / 2;
+  const cy = height - chh - 12;
 
+  if (camReady()) {
     camGfx.image(cam, 0, 0, cw, chh);
     image(camGfx, cx, cy, cw, chh);
 
@@ -1045,11 +1047,11 @@ function drawChallengeHud() {
     strokeWeight(2);
     rect(cx + cw / 2 - 22, cy + chh / 2 - 22, 44, 44);
     noStroke();
-
-    scanButton = { x: cx, y: cy - 42, w: cw, h: 30 };
-  } else {
-    scanButton = { x: width - 152, y: height - 96, w: 140, h: 30 };
   }
+
+  // Same spot whether or not the camera has started, so the button never
+  // jumps around when the feed comes alive.
+  scanButton = { x: cx, y: cy - 42, w: cw, h: 30 };
 
   noStroke();
   fill(40, 130, 70);
