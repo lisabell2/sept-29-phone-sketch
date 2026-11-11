@@ -14,6 +14,7 @@ const MAX_ENTITIES = 100;
 const HATER_COUNT = 6;
 const HATER_BASE_SPEED = 1.5;
 const HATER_FLEE_SPEED = 4.0;
+const HATER_RESEED_DELAY_MS = 6000;
 const INFECTION_RADIUS = 45;
 const KILL_HITBOX_RADIUS = 50;
 const COLOR_CHALLENGE_DURATION_SEC = 30;
@@ -23,16 +24,23 @@ const CHALLENGE_BANNER_HEIGHT = 84;
 const CAM_WINDOW_WIDTH = 200;
 const CAM_WINDOW_HEIGHT = 150;
 const NETWORK_SYNC_RATE_MS = 66;
-const FIRST_CHALLENGE_DELAY_MS = 15000;
-const CHALLENGE_INTERVAL_MS = 45000;
+const FIRST_CHALLENGE_MIN_DELAY_MS = 8000;
+const FIRST_CHALLENGE_MAX_DELAY_MS = 20000;
+const CHALLENGE_GAP_MIN_MS = 20000;
+const CHALLENGE_GAP_MAX_MS = 60000;
 const TILT_RANGE = 25;
 const TILT_CURVE = 1.3;
 const VERTICAL_GRAVITY_MULT = 1.6;
 const MOVE_GRAVITY = 1.6;
 const MOVE_MAX_SPEED = 11;
 const MOVE_DAMPING = 0.995;
+const REGION_BOUNCE = 0.55;
 const LOOK_COUNT = 3;
-const BUILD_ID = 'v10';
+// Hater art mirrors the good-pfp pattern: each hater picks one look at
+// random. Only badpfp.png exists today — drop badpfp.2.png / badpfp.3.png
+// into references/ and they are picked up automatically.
+const HATER_LOOKS = ['badpfp.png', 'badpfp.2.png', 'badpfp.3.png'];
+const BUILD_ID = 'v11';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -48,8 +56,8 @@ const COLORS = [
 ];
 
 let goodPfps = [];
+let haterPfps = [];
 let heartImg;
-let haterImg;
 let mapImg;
 
 let cam;
@@ -98,8 +106,17 @@ let challenge = {
   nextAt: 0,
 };
 
+// Host-side clock for every player's own challenge. The local player's
+// entry is aliased into `challenge` so the HUD reads it directly; clients
+// receive only their own entry through the state sync.
+let challenges = {};
+
+// Host-side timestamp for the next hater re-seed once the world runs out.
+let haterReseedAt = 0;
+
 let message = '';
 let messageRemainingMs = 0;
+let messagePersonal = false;
 let scanButton = { x: 0, y: 0, w: 0, h: 0 };
 
 function setup() {
@@ -126,7 +143,11 @@ async function loadAssets() {
     if (img) goodPfps.push(img);
   }
   heartImg = await tryLoad('nh.png');
-  haterImg = await tryLoad('badpfp.png');
+  haterPfps = [];
+  for (const file of HATER_LOOKS) {
+    const img = await tryLoad(file);
+    if (img) haterPfps.push(img);
+  }
   mapImg = await tryLoad('map.png');
   imageMode(CENTER);
 }
@@ -247,8 +268,10 @@ function drawEntities() {
 
 function drawSprite(e) {
   if (e.type === 'hater') {
-    if (haterImg) {
-      image(haterImg, e.x, e.y, SPRITE_SIZE, SPRITE_SIZE);
+    const look = e.look || 0;
+    const img = haterPfps.length ? haterPfps[look % haterPfps.length] : null;
+    if (img) {
+      image(img, e.x, e.y, SPRITE_SIZE, SPRITE_SIZE);
     } else {
       drawFallbackHater(e.x, e.y, SPRITE_SIZE);
     }
@@ -517,9 +540,10 @@ function findKillTarget(wx, wy) {
   return best;
 }
 
-function showMessage(text) {
+function showMessage(text, personal) {
   message = text;
   messageRemainingMs = 2500;
+  messagePersonal = !!personal;
 }
 
 // ---------- networking ----------
@@ -540,7 +564,8 @@ function startNetwork() {
     playerRegions[peer.id] = 0;
     if (!viewInitialized) centerOnRegion(0);
     seedHaters();
-    challenge.nextAt = millis() + FIRST_CHALLENGE_DELAY_MS;
+    challenges = {};
+    challenge = ensureChallengeFor(localId);
     connected = true;
   });
 
@@ -560,6 +585,7 @@ function startNetwork() {
       connections.push(conn);
       const region = freeRegion();
       playerRegions[conn.peer] = region;
+      ensureChallengeFor(conn.peer);
       conn.send({ type: 'WELCOME', region: region, state: hostState() });
       broadcast({ type: 'STATE', state: hostState() });
     });
@@ -627,7 +653,8 @@ function goSolo() {
   playerRegions[localId] = 0;
   if (!viewInitialized) centerOnRegion(0);
   seedHaters();
-  challenge.nextAt = millis() + FIRST_CHALLENGE_DELAY_MS;
+  challenges = {};
+  challenge = ensureChallengeFor(localId);
   if (peer) {
     try { peer.destroy(); } catch (err) {}
   }
@@ -649,6 +676,7 @@ function removePlayer(peerId) {
   delete playerRegions[peerId];
   delete playerViews[peerId];
   delete playerTilt[peerId];
+  delete challenges[peerId];
   broadcast({ type: 'STATE', state: hostState() });
 }
 
@@ -672,7 +700,7 @@ function handleLocal(msg) {
     const target = findEntity(msg.id);
     if (target && regionAt(target.x, target.y) === myRegion) killEntity(msg.id);
   }
-  if (msg.type === 'SCAN' && msg.success) hostWipeHaters();
+  if (msg.type === 'SCAN' && msg.success) hostWipeHaters(localId);
 }
 
 function handleHostData(conn, data) {
@@ -692,7 +720,7 @@ function handleHostData(conn, data) {
     playerViews[conn.peer] = data;
     playerTilt[conn.peer] = data.tilt;
   } else if (data.type === 'SCAN') {
-    if (data.success) hostWipeHaters();
+    if (data.success) hostWipeHaters(conn.peer);
   }
 }
 
@@ -718,22 +746,29 @@ function handleClientData(data) {
 }
 
 function hostState() {
+  const outChallenges = {};
+  for (const id in challenges) {
+    const c = challenges[id];
+    outChallenges[id] = {
+      active: c.active,
+      name: c.name,
+      rgb: c.rgb,
+      remainingMs: c.remainingMs,
+    };
+  }
   return {
     entities: entities,
-    challenge: {
-      active: challenge.active,
-      name: challenge.name,
-      rgb: challenge.rgb,
-      remainingMs: challenge.remainingMs,
-    },
+    challenges: outChallenges,
     regions: playerRegions,
-    message: message,
-    messageRemainingMs: messageRemainingMs,
+    // Personal toasts (e.g. "Challenge missed") stay on the phone that
+    // earned them; everything else is broadcast to the room.
+    message: messagePersonal ? '' : message,
+    messageRemainingMs: messagePersonal ? 0 : messageRemainingMs,
   };
 }
 
 function applyState(state, snap) {
-  if (!state || !state.challenge) return;
+  if (!state) return;
 
   const incoming = state.entities || [];
   const next = [];
@@ -767,13 +802,23 @@ function applyState(state, snap) {
   }
 
   entities = next;
-  challenge.active = state.challenge.active;
-  challenge.name = state.challenge.name;
-  challenge.rgb = state.challenge.rgb;
-  challenge.remainingMs = state.challenge.remainingMs;
+  // Every player runs their own challenge: apply only my clock, and
+  // catch the moment it expires so the "missed" toast stays personal.
+  const mine = state.challenges ? state.challenges[localId] : null;
+  if (mine) {
+    const wasActive = challenge.active;
+    challenge.active = mine.active;
+    challenge.name = mine.name;
+    challenge.rgb = mine.rgb;
+    challenge.remainingMs = mine.remainingMs;
+    if (wasActive && !mine.active && mine.remainingMs <= 0) {
+      showMessage('Challenge missed', true);
+    }
+  }
 
   // Keep a local message alive even when the host has nothing to say.
-  if (state.messageRemainingMs > 0) {
+  // A personal toast (e.g. "Color found!") is never stomped by the host.
+  if (state.messageRemainingMs > 0 && !messagePersonal) {
     message = state.message || '';
     messageRemainingMs = state.messageRemainingMs;
   }
@@ -808,6 +853,8 @@ function networkTick() {
 
   if (messageRemainingMs > 0) {
     messageRemainingMs -= deltaTime;
+  } else {
+    messagePersonal = false;
   }
 }
 
@@ -834,7 +881,8 @@ function hostUpdate() {
   updateHaters(dt);
   updateCharacters(dt, now);
   checkInfections();
-  updateChallenge(now);
+  updateChallenges(now);
+  updateHaterReseed(now);
 }
 
 function updateHaters(step) {
@@ -889,14 +937,51 @@ function updateCharacters(step, now) {
       e.vy = (e.vy / speed) * maxSpeed;
     }
 
-    e.x = wrapX(e.x + e.vx);
-    e.y = wrapY(e.y + e.vy);
+    e.x += e.vx;
+    e.y += e.vy;
+
+    // Characters tilt around freely but never leave their owner's
+    // region: they bounce off its walls instead of crossing over.
+    // (Haters keep roaming the whole torus.)
+    const region = playerRegions[e.owner];
+    if (region !== undefined) {
+      boundToRegion(e, region);
+    } else {
+      e.x = wrapX(e.x);
+      e.y = wrapY(e.y);
+    }
+
     e.tx = e.x;
     e.ty = e.y;
 
     if (e.isHeart && now - e.born >= HEART_TRANSFORM_MS) {
       e.isHeart = false;
     }
+  }
+}
+
+function boundToRegion(e, region) {
+  const b = regionBounds(region);
+  const pad = SPRITE_SIZE / 2;
+  const minX = b.x + pad;
+  const maxX = b.x + WORLD_WIDTH / 2 - pad;
+  const minY = b.y + pad;
+  const maxY = b.y + WORLD_HEIGHT / 2 - pad;
+
+  if (e.x < minX) {
+    e.x = minX;
+    e.vx = Math.abs(e.vx || 0) * REGION_BOUNCE;
+  } else if (e.x > maxX) {
+    e.x = maxX;
+    e.vx = -Math.abs(e.vx || 0) * REGION_BOUNCE;
+  }
+
+  if (e.y < minY) {
+    e.y = minY;
+    e.vy = Math.abs(e.vy || 0) * REGION_BOUNCE;
+  } else if (e.y > maxY) {
+    e.y = maxY;
+    e.vy = -Math.abs(e.vy || 0) * REGION_BOUNCE;
   }
 }
 
@@ -914,13 +999,16 @@ function checkInfections() {
 
 function seedHaters() {
   for (let i = 0; i < HATER_COUNT; i++) {
+    const x = random(WORLD_WIDTH);
+    const y = random(WORLD_HEIGHT);
     entities.push({
       id: nextEntityId++,
       type: 'hater',
-      x: random(WORLD_WIDTH),
-      y: random(WORLD_HEIGHT),
-      tx: 0,
-      ty: 0,
+      look: Math.floor(Math.random() * HATER_LOOKS.length),
+      x: x,
+      y: y,
+      tx: x,
+      ty: y,
       vx: 0,
       vy: 0,
       angle: random(TWO_PI),
@@ -928,10 +1016,6 @@ function seedHaters() {
       infected: false,
       color: null,
     });
-  }
-  for (const e of entities) {
-    e.tx = e.x;
-    e.ty = e.y;
   }
 }
 
@@ -965,32 +1049,70 @@ function killEntity(id) {
   return entities.length !== before;
 }
 
-function hostWipeHaters() {
+function hostWipeHaters(winnerId) {
   entities = entities.filter((e) => e.type !== 'hater');
-  challenge.active = false;
-  challenge.remainingMs = 0;
-  challenge.nextAt = millis() + CHALLENGE_INTERVAL_MS;
+  const c = challenges[winnerId];
+  if (c && c.active) {
+    // Leave remainingMs > 0 so the winner's phone can tell a win apart
+    // from a timeout (which expires at exactly 0).
+    c.active = false;
+    c.nextAt = millis() + nextChallengeDelay();
+  }
   showMessage('All haters wiped!');
 }
 
-function updateChallenge(now) {
-  if (challenge.active) {
-    challenge.remainingMs = Math.max(0, challenge.remainingMs - deltaTime);
-    if (challenge.remainingMs <= 0) {
-      challenge.active = false;
-      challenge.nextAt = now + CHALLENGE_INTERVAL_MS;
-      showMessage('Challenge missed');
+function updateChallenges(now) {
+  for (const id in challenges) {
+    const c = challenges[id];
+    if (c.active) {
+      c.remainingMs = Math.max(0, c.remainingMs - deltaTime);
+      if (c.remainingMs <= 0) {
+        c.active = false;
+        c.nextAt = now + nextChallengeDelay();
+        if (id === localId) showMessage('Challenge missed', true);
+      }
+    } else if (now >= c.nextAt && c.nextAt !== 0) {
+      const col = COLORS[Math.floor(random(COLORS.length))];
+      c.active = true;
+      c.name = col.name;
+      c.rgb = col.rgb;
+      c.remainingMs = COLOR_CHALLENGE_DURATION_SEC * 1000;
     }
+  }
+  if (challenges[localId]) challenge = challenges[localId];
+}
+
+function updateHaterReseed(now) {
+  if (haterCount() > 0) {
+    haterReseedAt = 0;
     return;
   }
-
-  if (now >= challenge.nextAt && challenge.nextAt !== 0) {
-    const c = COLORS[Math.floor(random(COLORS.length))];
-    challenge.active = true;
-    challenge.name = c.name;
-    challenge.rgb = c.rgb;
-    challenge.remainingMs = COLOR_CHALLENGE_DURATION_SEC * 1000;
+  if (!haterReseedAt) {
+    haterReseedAt = now + HATER_RESEED_DELAY_MS;
+  } else if (now >= haterReseedAt) {
+    seedHaters();
+    haterReseedAt = 0;
+    showMessage('New haters arrived!');
   }
+}
+
+// Every player gets their own random schedule: first challenge 8-20s in,
+// then 20-60s gaps between challenges.
+function nextChallengeDelay() {
+  return random(CHALLENGE_GAP_MIN_MS, CHALLENGE_GAP_MAX_MS);
+}
+
+function ensureChallengeFor(id) {
+  if (!challenges[id]) {
+    challenges[id] = {
+      active: false,
+      name: '',
+      rgb: [0, 0, 0],
+      remainingMs: 0,
+      nextAt: millis() + random(FIRST_CHALLENGE_MIN_DELAY_MS, FIRST_CHALLENGE_MAX_DELAY_MS),
+    };
+  }
+  return challenges[id];
 }
 
 // ---------- camera challenge ----------
@@ -1028,12 +1150,14 @@ function drawChallengeHud() {
 
   imageMode(CORNER);
 
-  if (camReady()) {
-    const cw = CAM_WINDOW_WIDTH;
-    const chh = CAM_WINDOW_HEIGHT;
-    const cx = width - cw - 12;
-    const cy = height - chh - 12;
+  // The scan window sits at the center of the screen, with the button
+  // right below it.
+  const cw = CAM_WINDOW_WIDTH;
+  const chh = CAM_WINDOW_HEIGHT;
+  const cx = width / 2 - cw / 2;
+  const cy = height / 2 - chh / 2;
 
+  if (camReady()) {
     camGfx.image(cam, 0, 0, cw, chh);
     image(camGfx, cx, cy, cw, chh);
 
@@ -1046,9 +1170,9 @@ function drawChallengeHud() {
     rect(cx + cw / 2 - 22, cy + chh / 2 - 22, 44, 44);
     noStroke();
 
-    scanButton = { x: cx, y: cy - 42, w: cw, h: 30 };
+    scanButton = { x: cx, y: cy + chh + 12, w: cw, h: 34 };
   } else {
-    scanButton = { x: width - 152, y: height - 96, w: 140, h: 30 };
+    scanButton = { x: width / 2 - 70, y: cy + chh + 12, w: 140, h: 34 };
   }
 
   noStroke();
