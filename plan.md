@@ -353,3 +353,8 @@ Scope delivered, per request: all 4 users add + remove sprites in only their own
 - Verified: headless-Edge load check (`data-ok="true"` — all 28 functions still defined, `ROOM_ID`/`BUILD_ID` read back correctly from global scope).
 - `BUILD_ID` → `'v16'`, `index.html` → `sketch.js?v=16`, bumped together.
 
+### Rollback: Restored the 'icons2' Build (v14)
+- At the user's request, the hater rework (v15, `h2`) and the room-id hotfix (v16, `h3`) are both rolled back — the game is back to how it was before any hater changes. `sketch.js` and `index.html` are restored from commit `a9aca33` ("icons2"): double-tap spawns a single icon at the tap point, 6 haters auto-seed at boot and flee from on-screen viewers, the camera color challenge (banner + SCAN button) is back, and characters stay inside their own region.
+- One deliberate exception, a single string: `ROOM_ID` → `'atelier-shared-world-4p-r3'`. The original room id is the one a still-open v15 tab can be squatting (v15 shipped without bumping it), and a v14 client that joins a v15 host rejects every STATE sync (v14's `applyState` bails without `state.challenge`) — a mixed-version room is a broken mess. The fresh `-r3` room guarantees the restored build starts clean no matter which old tabs are open. Everything else is byte-identical to `a9aca33` — `git diff a9aca33 -- sketch.js index.html` shows only the ROOM_ID line differing.
+- `BUILD_ID` stays `'v14'` (the bottom-left readout confirms the rollback) and `index.html` stays `?v=14`; caches for that URL expired when v15 shipped, so phones fetch it fresh.
+

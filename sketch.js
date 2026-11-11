@@ -1,6 +1,6 @@
 // Numbers to tune
 const SENSOR_PROMPT_TEXT = 'Tap to start';
-const ROOM_ID = 'atelier-shared-world-4p';
+const ROOM_ID = 'atelier-shared-world-4p-r3';
 const MAX_PLAYERS = 4;
 const WORLD_WIDTH = 2400;
 const WORLD_HEIGHT = 2400;
