@@ -1,6 +1,6 @@
 // Numbers to tune
 const SENSOR_PROMPT_TEXT = 'Tap to start';
-const ROOM_ID = 'atelier-shared-world-4p-r3';
+const ROOM_ID = 'atelier-shared-world-4p-r4';
 const MAX_PLAYERS = 4;
 const WORLD_WIDTH = 2400;
 const WORLD_HEIGHT = 2400;
@@ -12,7 +12,7 @@ const HEART_TRANSFORM_MS = 2000;
 const SPRITE_SIZE = 70;
 const MAX_ENTITIES = 100;
 // Haters only arrive via the double-tap reveal (no boot seeding) and
-// wander inside the region they spawned in (no fleeing to the edges).
+// roam the whole world freely — no regions, no edges to run to.
 const HATER_BASE_SPEED = 1.5;
 const INFECTION_RADIUS = 45;
 const KILL_HITBOX_RADIUS = 50;
@@ -31,6 +31,11 @@ const CHALLENGE_BANNER_HEIGHT = 84;
 const CAM_WINDOW_WIDTH = 200;
 const CAM_WINDOW_HEIGHT = 150;
 const NETWORK_SYNC_RATE_MS = 66;
+// A successful scan is resent until the host confirms it. The host may be
+// a background tab whose draw loop (and therefore the periodic state
+// broadcast) is paused, so the wipe is broadcast the moment it happens.
+const SCAN_RETRY_INTERVAL_MS = 500;
+const SCAN_RETRY_WINDOW_MS = 8000;
 const FIRST_CHALLENGE_DELAY_MS = 30000;
 const CHALLENGE_INTERVAL_MS = 45000;
 const TILT_RANGE = 25;
@@ -44,7 +49,7 @@ const LOOK_COUNT = 3;
 // A spawned heart reveals as one of LOOK_COUNT + 1 outcomes: one of the
 // positive profiles, or the hater. 0.25 = a 1-in-4 chance.
 const HATER_SPAWN_CHANCE = 0.25;
-const BUILD_ID = 'v17';
+const BUILD_ID = 'v18';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -97,6 +102,12 @@ let localId = 'host';
 let joinAttempts = 0;
 let reconnectTimer = null;
 let lastSyncSent = 0;
+// Scan reconciliation: the host counts wipes, clients keep retrying until
+// they see the counter move (see onScanPressed / applyState).
+let wipeCount = 0;
+let lastWipeCount = 0;
+let scanPendingUntil = 0;
+let lastScanSentAt = 0;
 
 const playerRegions = {};
 const playerTilt = {};
@@ -680,13 +691,33 @@ function sendToHost(msg) {
   }
 }
 
+function sendScanToHost() {
+  if (hostConn && hostConn.open) {
+    hostConn.send({ type: 'SCAN', success: true });
+    lastScanSentAt = millis();
+  }
+}
+
 function handleLocal(msg) {
-  if (msg.type === 'SPAWN') spawnCharacter(msg.x, msg.y, null, localId);
+  if (msg.type === 'SPAWN') {
+    spawnCharacter(msg.x, msg.y, null, localId);
+    broadcastStateNow();
+  }
   if (msg.type === 'KILL') {
     const target = findEntity(msg.id);
-    if (target && regionAt(target.x, target.y) === myRegion) killEntity(msg.id);
+    if (target && regionAt(target.x, target.y) === myRegion) {
+      killEntity(msg.id);
+      broadcastStateNow();
+    }
   }
   if (msg.type === 'SCAN' && msg.success) hostWipeHaters();
+}
+
+// Push state the instant something changes. The periodic broadcast lives
+// in networkTick(), which runs from draw() — a hidden host tab pauses
+// draw(), so mutations must not depend on it.
+function broadcastStateNow() {
+  broadcast({ type: 'STATE', state: hostState() });
 }
 
 function handleHostData(conn, data) {
@@ -695,12 +726,14 @@ function handleHostData(conn, data) {
   if (data.type === 'SPAWN') {
     if (playerRegions[conn.peer] === regionAt(data.x, data.y)) {
       spawnCharacter(data.x, data.y, null, conn.peer);
+      broadcastStateNow();
     }
   } else if (data.type === 'KILL') {
     // A client may only remove things sitting inside its own region.
     const target = findEntity(data.id);
     if (target && playerRegions[conn.peer] === regionAt(target.x, target.y)) {
       killEntity(data.id);
+      broadcastStateNow();
     }
   } else if (data.type === 'VIEW') {
     playerViews[conn.peer] = data;
@@ -739,6 +772,7 @@ function hostState() {
       name: challenge.name,
       rgb: challenge.rgb,
       remainingMs: challenge.remainingMs,
+      wipeCount: wipeCount,
     },
     regions: playerRegions,
     message: message,
@@ -780,8 +814,18 @@ function applyState(state, snap) {
     }
   }
 
-  entities = next;
-  challenge.active = state.challenge.active;
+  // Host confirmation of a wipe clears the retry window.
+  const incomingWipe = state.challenge.wipeCount || 0;
+  if (incomingWipe > lastWipeCount) {
+    lastWipeCount = incomingWipe;
+    scanPendingUntil = 0;
+  }
+
+  // Until the host confirms (or the retry window lapses), keep the
+  // optimistic local wipe: no haters, no banner, no scan window.
+  const pending = scanPendingUntil > millis();
+  entities = pending ? next.filter((e) => e.type !== 'hater') : next;
+  challenge.active = state.challenge.active && !pending;
   challenge.name = state.challenge.name;
   challenge.rgb = state.challenge.rgb;
   challenge.remainingMs = state.challenge.remainingMs;
@@ -817,6 +861,13 @@ function networkTick() {
         zoom: view.zoom,
         tilt: readTilt(),
       });
+    }
+
+    // Keep resending a successful scan until the host confirms it.
+    if (scanPendingUntil > millis()) {
+      if (millis() - lastScanSentAt >= SCAN_RETRY_INTERVAL_MS) sendScanToHost();
+    } else if (scanPendingUntil !== 0) {
+      scanPendingUntil = 0;
     }
   }
 
@@ -855,50 +906,15 @@ function updateHaters(step) {
   for (const e of entities) {
     if (e.type !== 'hater' || e.isHeart) continue;
 
-    // Haters wander gently and bounce inside the region they spawned
-    // in — they never run for the edges or cross a region border.
+    // Haters roam the whole canvas freely — no region walls, no fleeing
+    // to the edges. They simply wrap around the world torus like the
+    // camera does.
     e.angle = (e.angle || 0) + random(-0.06, 0.06) * step;
-    e.x += Math.cos(e.angle) * HATER_BASE_SPEED * step;
-    e.y += Math.sin(e.angle) * HATER_BASE_SPEED * step;
-
-    bounceHaterInRegion(e);
+    e.x = wrapX(e.x + Math.cos(e.angle) * HATER_BASE_SPEED * step);
+    e.y = wrapY(e.y + Math.sin(e.angle) * HATER_BASE_SPEED * step);
 
     e.tx = e.x;
     e.ty = e.y;
-  }
-}
-
-// Haters steer with an angle instead of a velocity, so a wall hit
-// mirrors the heading. A hater without a region (should not happen)
-// falls back to the world torus.
-function bounceHaterInRegion(e) {
-  if (e.region === undefined || e.region === null) {
-    e.x = wrapX(e.x);
-    e.y = wrapY(e.y);
-    return;
-  }
-
-  const b = regionBounds(e.region);
-  const pad = SPRITE_SIZE / 2;
-  const minX = b.x + pad;
-  const maxX = b.x + WORLD_WIDTH / 2 - pad;
-  const minY = b.y + pad;
-  const maxY = b.y + WORLD_HEIGHT / 2 - pad;
-
-  if (e.x < minX) {
-    e.x = minX;
-    e.angle = Math.PI - e.angle;
-  } else if (e.x > maxX) {
-    e.x = maxX;
-    e.angle = Math.PI - e.angle;
-  }
-
-  if (e.y < minY) {
-    e.y = minY;
-    e.angle = -e.angle;
-  } else if (e.y > maxY) {
-    e.y = maxY;
-    e.angle = -e.angle;
   }
 }
 
@@ -1015,15 +1031,12 @@ function spawnCharacter(x, y, color, owner) {
 
 // A hater born disguised as a heart. While isHeart is true it is
 // handled exactly like any other heart (tilt drift, region bounce,
-// the 2s transform); after the reveal it behaves like the seeded haters.
+// the 2s transform); after the reveal it roams the whole world.
 function spawnHater(x, y, owner) {
   entities.push({
     id: nextEntityId++,
     type: 'hater',
     owner: owner,
-    // Stamped once so the hater bounces inside this region for its
-    // whole life, even if the owner later disconnects.
-    region: playerRegions[owner],
     look: 0,
     x: x,
     y: y,
@@ -1046,11 +1059,22 @@ function killEntity(id) {
 }
 
 function hostWipeHaters() {
+  clearHaters();
+  wipeCount++;
+  challenge.nextAt = millis() + CHALLENGE_INTERVAL_MS;
+  showMessage('All haters wiped!');
+
+  // Broadcast right here instead of waiting for the next draw() tick:
+  // a backgrounded host tab pauses its draw loop, and without this the
+  // phones would never hear that the wipe happened.
+  broadcastStateNow();
+}
+
+// Shared local half of a wipe. Safe to run on host or client.
+function clearHaters() {
   entities = entities.filter((e) => e.type !== 'hater');
   challenge.active = false;
   challenge.remainingMs = 0;
-  challenge.nextAt = millis() + CHALLENGE_INTERVAL_MS;
-  showMessage('All haters wiped!');
 }
 
 function updateChallenge(now) {
@@ -1216,7 +1240,17 @@ function onScanPressed() {
   }
 
   if (colorMatches(sampled, challenge.rgb)) {
-    sendToHost({ type: 'SCAN', success: true });
+    if (isHost) {
+      hostWipeHaters();
+    } else {
+      // Optimistic local wipe: the window, banner and haters disappear
+      // immediately, then the host is told (and reminded) until it
+      // confirms with a STATE carrying the new wipeCount.
+      clearHaters();
+      challenge.nextAt = millis() + CHALLENGE_INTERVAL_MS;
+      scanPendingUntil = millis() + SCAN_RETRY_WINDOW_MS;
+      sendScanToHost();
+    }
     showMessage('Color found!');
   } else {
     // Report what the camera actually saw — phones under auto-exposure
