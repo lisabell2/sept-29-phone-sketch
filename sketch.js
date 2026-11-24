@@ -1,6 +1,6 @@
 // Numbers to tune
 const SENSOR_PROMPT_TEXT = 'Tap to start';
-const ROOM_ID = 'atelier-shared-world-4p-r4';
+const ROOM_ID = 'atelier-shared-world-4p-r5';
 const MAX_PLAYERS = 4;
 const WORLD_WIDTH = 2400;
 const WORLD_HEIGHT = 2400;
@@ -31,6 +31,9 @@ const CHALLENGE_BANNER_HEIGHT = 84;
 const CAM_WINDOW_WIDTH = 200;
 const CAM_WINDOW_HEIGHT = 150;
 const NETWORK_SYNC_RATE_MS = 66;
+// A failed join is never final: keep trying to claim the room (or join the
+// current host) on this cadence until a real shared world exists.
+const JOIN_RETRY_MS = 3000;
 // A successful scan is resent until the host confirms it. The host may be
 // a background tab whose draw loop (and therefore the periodic state
 // broadcast) is paused, so the wipe is broadcast the moment it happens.
@@ -49,7 +52,7 @@ const LOOK_COUNT = 3;
 // A spawned heart reveals as one of LOOK_COUNT + 1 outcomes: one of the
 // positive profiles, or the hater. 0.25 = a 1-in-4 chance.
 const HATER_SPAWN_CHANCE = 0.25;
-const BUILD_ID = 'v18';
+const BUILD_ID = 'v19';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -99,7 +102,6 @@ let myRegion = -1;
 let connected = false;
 let soloMode = false;
 let localId = 'host';
-let joinAttempts = 0;
 let reconnectTimer = null;
 let lastSyncSent = 0;
 // Scan reconciliation: the host counts wipes, clients keep retrying until
@@ -215,7 +217,7 @@ function drawRegions() {
     rect(b.x, b.y, halfW, halfH);
 
     // Label on a backing chip so it stays readable on the map photo.
-    const label = mine ? 'YOUR REGION' : 'REGION ' + r;
+    const label = mine ? 'YOUR REGION ' + (r + 1) : 'REGION ' + (r + 1);
     const ts = 22 / view.zoom;
     textSize(ts);
     const tw = textWidth(label) + 26 / view.zoom;
@@ -352,7 +354,7 @@ function drawHud() {
   fill(20);
   textAlign(CENTER, TOP);
   textSize(16);
-  text('Your Region: ' + (myRegion < 0 ? '—' : myRegion), width / 2, topY);
+  text('Your Region: ' + (myRegion < 0 ? '—' : myRegion + 1) + ' / ' + MAX_PLAYERS, width / 2, topY);
 
   textSize(12);
   fill(90);
@@ -368,7 +370,7 @@ function drawHud() {
   if (soloMode) {
     fill(160, 100, 0);
     textSize(12);
-    text('Solo mode — no room found', width / 2, topY + 82);
+    text('Solo mode — PeerJS unavailable', width / 2, topY + 82);
   }
 
   drawChallengeHud();
@@ -392,10 +394,12 @@ function haterCount() {
 }
 
 function connectionLabel() {
-  if (isHost && connections.length === 0) return 'Host — waiting for players';
-  if (isHost) return 'Host — players: ' + (connections.length + 1) + ' / ' + MAX_PLAYERS;
-  if (connected) return 'Connected — players: ' + Object.keys(playerRegions).length + ' / ' + MAX_PLAYERS;
-  return 'Connecting…';
+  const players = isHost ? connections.length + 1 : Object.keys(playerRegions).length;
+  const region = myRegion < 0 ? '—' : myRegion + 1;
+  if (soloMode) return 'Solo — region ' + region + ' / ' + players + ' (no PeerJS)';
+  if (isHost) return 'Host — region ' + region + ' · players ' + players + '/' + MAX_PLAYERS;
+  if (connected) return 'Connected — region ' + region + ' · players ' + players + '/' + MAX_PLAYERS;
+  return 'Connecting… — retrying';
 }
 
 // ---------- input ----------
@@ -550,30 +554,72 @@ function showMessage(text) {
 }
 
 // ---------- networking ----------
+//
+// Host election uses one fixed PeerJS id. Whoever claims it is host and
+// owns region 0; everyone else becomes a client and gets region 1-3 from
+// the host. A failed join is NEVER final: the retry timer keeps trying to
+// claim the room until somebody holds it. The old 4-error "goSolo()" path
+// parked every phone in its own isolated region-0 world and never came
+// back — that was the missing-regions bug.
 
 function startNetwork() {
   if (!window.Peer) {
     goSolo();
     return;
   }
+  tryClaimHost();
+}
+
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function destroyPeer() {
+  // Null out first: close() fires 'close' synchronously on some PeerJS
+  // versions, and that must not re-enter this function.
+  const conn = hostConn;
+  hostConn = null;
+  if (conn) {
+    try { conn.close(); } catch (err) {}
+  }
+  const p = peer;
+  peer = null;
+  if (p) {
+    try { p.destroy(); } catch (err) {}
+  }
+}
+
+function clearMap(map) {
+  for (const key in map) delete map[key];
+}
+
+function hasGoodRoom() {
+  return !!hostConn && hostConn.open && connected && myRegion >= 0 && !soloMode;
+}
+
+function tryClaimHost() {
+  if (hasGoodRoom()) return;
+  clearReconnectTimer();
+  destroyPeer();
 
   const hostId = ROOM_ID + '-host';
-  peer = new Peer(hostId, { debug: 0 });
+  try {
+    peer = new Peer(hostId, { debug: 0 });
+  } catch (err) {
+    scheduleJoinRetry();
+    return;
+  }
 
-  peer.on('open', () => {
-    isHost = true;
-    localId = peer.id;
-    myRegion = 0;
-    playerRegions[peer.id] = 0;
-    if (!viewInitialized) centerOnRegion(0);
-    challenge.nextAt = millis() + FIRST_CHALLENGE_DELAY_MS;
-    connected = true;
-  });
+  peer.on('open', () => becomeHost(peer.id));
 
-  peer.on('error', (err) => {
-    if (err.type === 'unavailable-id' || !connected) {
-      becomeClient();
-    }
+  peer.on('error', () => {
+    // A transient signaling error must not dethrone a working host.
+    if (isHost && connected && !soloMode) return;
+    // Someone else holds the id (or the claim failed): join them instead.
+    becomeClient();
   });
 
   peer.on('connection', (conn) => {
@@ -595,67 +641,108 @@ function startNetwork() {
   });
 }
 
-function becomeClient() {
-  if (isHost) return;
+function becomeHost(id) {
+  // A device that was solo/offline must throw away its private world.
+  const freshHost = !isHost || soloMode;
+  isHost = true;
+  soloMode = false;
+  connected = true;
+  localId = id;
+  myRegion = 0;
 
-  joinAttempts++;
-  if (joinAttempts > 3) {
-    goSolo();
+  if (freshHost) {
+    entities = [];
+    clearMap(playerRegions);
+    clearMap(playerViews);
+    clearMap(playerTilt);
+    connections = [];
+    challenge.nextAt = millis() + FIRST_CHALLENGE_DELAY_MS;
+    centerOnRegion(0);
+  }
+  playerRegions[id] = 0;
+  clearReconnectTimer();
+}
+
+function becomeClient() {
+  if (isHost && !soloMode) return;
+  if (hasGoodRoom()) return;
+
+  clearReconnectTimer();
+  destroyPeer();
+
+  const hostId = ROOM_ID + '-host';
+  try {
+    peer = new Peer(null, { debug: 0 });
+  } catch (err) {
+    scheduleJoinRetry();
     return;
   }
 
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
-
-  if (peer) {
-    try { peer.destroy(); } catch (err) {}
-  }
-
-  const hostId = ROOM_ID + '-host';
-  peer = new Peer(null, { debug: 0 });
-
   peer.on('open', () => {
     localId = peer.id;
-    hostConn = peer.connect(hostId, { reliable: true });
-    hostConn.on('open', () => {
+    let conn;
+    try {
+      conn = peer.connect(hostId, { reliable: true });
+    } catch (err) {
+      scheduleJoinRetry();
+      return;
+    }
+    hostConn = conn;
+
+    conn.on('open', () => {
       connected = true;
-      joinAttempts = 0;
+      isHost = false;
+      soloMode = false;
     });
-    hostConn.on('data', (data) => handleClientData(data));
-    hostConn.on('close', () => {
-      connected = false;
-      if (soloMode || isHost) return;
-      showMessage('Host left — reconnecting…');
-      reconnectTimer = setTimeout(() => {
-        if (!connected && !isHost) becomeClient();
-      }, 2500);
-    });
+    conn.on('data', (data) => handleClientData(data));
+    conn.on('close', () => onHostLinkLost());
+    conn.on('error', () => onHostLinkLost());
   });
 
   peer.on('error', () => {
-    if (!connected) becomeClient();
+    if (!connected || soloMode) onHostLinkLost();
   });
 
+  // Safety net for a stalled signaling server: no callback, still retry.
+  scheduleJoinRetry();
+}
+
+function onHostLinkLost() {
+  connected = false;
+  if (isHost && !soloMode) return;
+  showMessage('Connection lost — reconnecting…');
+  destroyPeer();
+  scheduleJoinRetry();
+}
+
+function scheduleJoinRetry() {
+  clearReconnectTimer();
   reconnectTimer = setTimeout(() => {
-    if (!connected && !isHost) becomeClient();
-  }, 8000);
+    reconnectTimer = null;
+    if (hasGoodRoom()) return;
+    if (isHost && !soloMode) return;
+    // Claim first: if the old host is gone, one of us becomes host; if it
+    // is alive, the claim is refused and we join as a client instead.
+    tryClaimHost();
+  }, JOIN_RETRY_MS);
 }
 
 function goSolo() {
-  if (isHost) return;
+  // Only reachable when the PeerJS library itself failed to load.
+  if (isHost && !soloMode) return;
   soloMode = true;
   isHost = true;
   connected = true;
   myRegion = 0;
   localId = 'host';
+  clearMap(playerRegions);
+  clearMap(playerViews);
+  clearMap(playerTilt);
   playerRegions[localId] = 0;
+  entities = [];
   if (!viewInitialized) centerOnRegion(0);
   challenge.nextAt = millis() + FIRST_CHALLENGE_DELAY_MS;
-  if (peer) {
-    try { peer.destroy(); } catch (err) {}
-  }
+  destroyPeer();
 }
 
 function freeRegion() {
@@ -752,15 +839,22 @@ function findEntity(id) {
 
 function handleClientData(data) {
   if (data.type === 'WELCOME') {
+    const regionChanged = myRegion !== data.region;
     myRegion = data.region;
     connected = true;
-    joinAttempts = 0;
-    if (!viewInitialized) centerOnRegion(myRegion);
+    isHost = false;
+    soloMode = false;
+    clearReconnectTimer();
+    // A device that was briefly solo has viewInitialized = true from
+    // region 0. It must re-center on the region the host actually gave
+    // it, or every phone stays parked on the top-left quadrant.
+    if (regionChanged || !viewInitialized) centerOnRegion(myRegion);
     applyState(data.state, true);
   } else if (data.type === 'STATE') {
     applyState(data.state, false);
   } else if (data.type === 'FULL') {
     showMessage('Room is full');
+    scheduleJoinRetry();
   }
 }
 
@@ -836,8 +930,21 @@ function applyState(state, snap) {
     messageRemainingMs = state.messageRemainingMs;
   }
 
-  for (const id in state.regions) {
-    playerRegions[id] = state.regions[id];
+  if (state.regions) {
+    // Mirror the host's map exactly (drop players who left), and make
+    // sure our own region matches what the host assigned. This is the
+    // safety net if WELCOME was missed after a reconnect.
+    for (const id in playerRegions) {
+      if (!(id in state.regions)) delete playerRegions[id];
+    }
+    for (const id in state.regions) {
+      playerRegions[id] = state.regions[id];
+    }
+    const assigned = state.regions[localId];
+    if (assigned !== undefined && assigned !== myRegion) {
+      myRegion = assigned;
+      centerOnRegion(myRegion);
+    }
   }
 }
 
