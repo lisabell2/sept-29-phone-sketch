@@ -406,3 +406,8 @@ Scope delivered, per request: all 4 users add + remove sprites in only their own
 - An infected heart still completes its 2-second heart-to-profile reveal before showing the black tint, so it can't get stuck as a heart.
 - No network/protocol change — `infected` was already broadcast in `hostState()` — so `ROOM_ID` stays `-r5`. `BUILD_ID` → `'v22'`, `index.html` → `sketch.js?v=22`, bumped together.
 
+### Permanent Profiles (v23)
+- Double-tap removal previously hit *any* entity in range, so normal (and black) profiles could be tapped out of existence. `isKillable(e)` now restricts kills to revealed haters (`type === 'hater' && !isHeart`). `findKillTarget()` uses it, and the host re-checks it in both `handleLocal()` and `handleHostData()` so a crafted `KILL` cannot delete a profile either.
+- A disguised hater is still untouchable while it is a heart, preserving the 1-in-4 reveal surprise. Tapping near a profile now spawns a heart instead of removing it (as long as the tap is in your own region).
+- No protocol change, so `ROOM_ID` stays `-r5`. `BUILD_ID` → `'v23'`, `index.html` → `sketch.js?v=23`, bumped together.
+

@@ -55,7 +55,7 @@ const LOOK_COUNT = 3;
 // A spawned heart reveals as one of LOOK_COUNT + 1 outcomes: one of the
 // positive profiles, or the hater. 0.25 = a 1-in-4 chance.
 const HATER_SPAWN_CHANCE = 0.25;
-const BUILD_ID = 'v22';
+const BUILD_ID = 'v23';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -537,13 +537,21 @@ function onDoubleTap(sx, sy) {
   requestSpawn(wrapX(w.x), wrapY(w.y));
 }
 
+// Profiles are permanent once revealed: neither a normal one nor a black
+// infected one can be tapped away. Only a hater that has finished its heart
+// disguise is killable. Keeping the disguise untouchable also preserves the
+// 1-in-4 surprise — a disguised hater is indistinguishable from a real heart.
+function isKillable(e) {
+  return e.type === 'hater' && !e.isHeart;
+}
+
 function findKillTarget(wx, wy) {
   let best = null;
   let bestD = KILL_HITBOX_RADIUS;
 
   for (const e of entities) {
     const d = dist(wx, wy, e.x, e.y);
-    if (d <= bestD && regionAt(e.x, e.y) === myRegion) {
+    if (d <= bestD && isKillable(e) && regionAt(e.x, e.y) === myRegion) {
       best = e;
       bestD = d;
     }
@@ -795,7 +803,7 @@ function handleLocal(msg) {
   }
   if (msg.type === 'KILL') {
     const target = findEntity(msg.id);
-    if (target && regionAt(target.x, target.y) === myRegion) {
+    if (target && isKillable(target) && regionAt(target.x, target.y) === myRegion) {
       killEntity(msg.id);
       broadcastStateNow();
     }
@@ -819,9 +827,10 @@ function handleHostData(conn, data) {
       broadcastStateNow();
     }
   } else if (data.type === 'KILL') {
-    // A client may only remove things sitting inside its own region.
+    // A client may only remove a revealed hater inside its own region.
     const target = findEntity(data.id);
-    if (target && playerRegions[conn.peer] === regionAt(target.x, target.y)) {
+    if (target && isKillable(target) &&
+        playerRegions[conn.peer] === regionAt(target.x, target.y)) {
       killEntity(data.id);
       broadcastStateNow();
     }
