@@ -36,8 +36,18 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
         with:
+          # Name it explicitly so the deploy step's artifact lookup cannot
+          # depend on the action's default.
+          name: github-pages
           # Upload entire repository
           path: '.'
+      # The upload step can succeed a second or two before the artifact's
+      # metadata is visible through the API. Give it a moment so deploy-pages
+      # does not briefly see 0 artifacts and fail the whole run.
+      - name: Wait for artifact metadata
+        run: sleep 10
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+        with:
+          artifact-name: github-pages

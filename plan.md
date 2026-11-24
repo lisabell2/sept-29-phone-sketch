@@ -396,3 +396,8 @@ Scope delivered, per request: all 4 users add + remove sprites in only their own
 - The layered halo was committed as v20 (`1d26426 border`); this pass removes it in favour of the simpler colour-only fix. Tags are never reused, so `BUILD_ID` → `'v21'` and `index.html` → `sketch.js?v=21`, bumped together. No network/protocol change, so `ROOM_ID` stays `-r5`.
 - Verified via headless Edge with stubbed p5 drawing (`data-ok="true"`): background uses the sampled RGB, the halo code is gone, and `drawMap()` still draws the one map image at the world origin.
 
+### Deployment Fix: Pages Artifact Race
+- Run #33 (`color`, `6c08936`) failed at "Deploy to GitHub Pages" with `No artifacts named "github-pages" were found`, even though "Upload artifact" succeeded and the API now shows that exact artifact (id `14970432677`, 8.3 MB, not expired). GitHub status was all green and the same workflow succeeded on #32, so this was a metadata propagation race, not a code problem.
+- `.github/workflows/static.yml` now names the artifact explicitly (`name: github-pages` on upload, `artifact-name: github-pages` on deploy) and waits 10 seconds between upload and deploy so the artifact is visible to the deploy step's lookup.
+- No sketch change, so `BUILD_ID` stays `v21`.
+
