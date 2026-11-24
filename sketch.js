@@ -6,13 +6,9 @@ const WORLD_WIDTH = 2400;
 const WORLD_HEIGHT = 2400;
 const MIN_ZOOM = 0.14;
 const MAX_ZOOM = 1.5;
-// The map art ends at the world edge, so zooming out used to reveal a hard
-// white rectangle around it. A translucent halo made from the same map,
-// plus a matching sky colour, lets the world fade out instead of stopping.
-const MAP_BLEED = 1200;
-const MAP_HALO_LAYERS = 10;
-const MAP_BACKDROP_SCALE = 0.25;
-const MAP_EDGE_RGB = [74, 130, 204];
+// The map ends at the world edge, so zooming out used to reveal white
+// around it. Clear to the same light blue as the water inside the map.
+const MAP_WATER_RGB = [200, 232, 254];
 const DOUBLE_TAP_TIME_MS = 300;
 const DOUBLE_TAP_MAX_DISTANCE = 25;
 const HEART_TRANSFORM_MS = 2000;
@@ -59,7 +55,7 @@ const LOOK_COUNT = 3;
 // A spawned heart reveals as one of LOOK_COUNT + 1 outcomes: one of the
 // positive profiles, or the hater. 0.25 = a 1-in-4 chance.
 const HATER_SPAWN_CHANCE = 0.25;
-const BUILD_ID = 'v20';
+const BUILD_ID = 'v21';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -78,7 +74,6 @@ let goodPfps = [];
 let heartImg;
 let haterImg;
 let mapImg;
-let mapBackdrop = null;
 
 let cam;
 let camGfx;
@@ -161,7 +156,6 @@ async function loadAssets() {
   heartImg = await tryLoad('nh.png');
   haterImg = await tryLoad('badpfp.png');
   mapImg = await tryLoad('map.png');
-  buildMapBackdrop();
   imageMode(CENTER);
 }
 
@@ -177,33 +171,8 @@ function assetUrl(file) {
   return 'references/' + file + '?v=' + BUILD_ID;
 }
 
-// Precompute one low-resolution halo buffer at load time so the per-frame
-// cost is a single image draw. Stacking progressively larger, very faint
-// copies of the map feathers the edge; near the map the copies overlap to
-// full strength, while the outermost layer only tints the sky colour.
-// This avoids canvas blur filters, which are unreliable on mobile browsers.
-function buildMapBackdrop() {
-  if (!mapImg) return;
-  const s = MAP_BACKDROP_SCALE;
-  const w = Math.ceil((WORLD_WIDTH + MAP_BLEED * 2) * s);
-  const h = Math.ceil((WORLD_HEIGHT + MAP_BLEED * 2) * s);
-  const g = createGraphics(w, h);
-  g.pixelDensity(1);
-  g.background(MAP_EDGE_RGB[0], MAP_EDGE_RGB[1], MAP_EDGE_RGB[2]);
-  g.imageMode(CORNER);
-  g.noStroke();
-  for (let i = MAP_HALO_LAYERS; i >= 1; i--) {
-    const grow = (MAP_BLEED * i) / MAP_HALO_LAYERS;
-    g.tint(255, 255 / MAP_HALO_LAYERS);
-    g.image(mapImg, -grow * s, -grow * s,
-      (WORLD_WIDTH + grow * 2) * s, (WORLD_HEIGHT + grow * 2) * s);
-  }
-  g.noTint();
-  mapBackdrop = g;
-}
-
 function draw() {
-  background(MAP_EDGE_RGB[0], MAP_EDGE_RGB[1], MAP_EDGE_RGB[2]);
+  background(MAP_WATER_RGB[0], MAP_WATER_RGB[1], MAP_WATER_RGB[2]);
   push();
   applyCamera();
   drawWorld();
@@ -228,10 +197,6 @@ function drawMap() {
   if (!mapImg) return;
   push();
   imageMode(CORNER);
-  if (mapBackdrop) {
-    image(mapBackdrop, -MAP_BLEED, -MAP_BLEED,
-      WORLD_WIDTH + MAP_BLEED * 2, WORLD_HEIGHT + MAP_BLEED * 2);
-  }
   image(mapImg, 0, 0, WORLD_WIDTH, WORLD_HEIGHT);
   pop();
 }
