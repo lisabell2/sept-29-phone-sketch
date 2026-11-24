@@ -55,7 +55,7 @@ const LOOK_COUNT = 3;
 // A spawned heart reveals as one of LOOK_COUNT + 1 outcomes: one of the
 // positive profiles, or the hater. 0.25 = a 1-in-4 chance.
 const HATER_SPAWN_CHANCE = 0.25;
-const BUILD_ID = 'v21';
+const BUILD_ID = 'v22';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -1036,34 +1036,45 @@ function updateCharacters(step, now) {
     // their heart stage are handled here like any other heart.
     if (e.type === 'hater' && !e.isHeart) continue;
 
-    const tilt = playerTilt[e.owner] || { x: 0, y: 0 };
-    e.vx = ((e.vx || 0) + tilt.x * MOVE_GRAVITY * step) * damp;
-    e.vy = ((e.vy || 0) + tilt.y * MOVE_GRAVITY * VERTICAL_GRAVITY_MULT * step) * damp;
-
-    const speed = Math.sqrt(e.vx * e.vx + e.vy * e.vy);
-    const maxSpeed = MOVE_MAX_SPEED * step;
-    if (speed > maxSpeed) {
-      e.vx = (e.vx / speed) * maxSpeed;
-      e.vy = (e.vy / speed) * maxSpeed;
-    }
-
-    e.x += e.vx;
-    e.y += e.vy;
-
-    // Characters tilt around freely but never leave their owner's
-    // region: they bounce off its walls instead of crossing over.
-    // (Haters keep roaming the whole torus.)
-    const region = playerRegions[e.owner];
-    if (region !== undefined) {
-      boundToRegion(e, region);
+    if (e.infected) {
+      // A profile that has turned black is frozen where it was infected:
+      // no tilt drift, no bounce, no interpolation for the other phones.
+      e.vx = 0;
+      e.vy = 0;
+      e.tx = e.x;
+      e.ty = e.y;
     } else {
-      e.x = wrapX(e.x);
-      e.y = wrapY(e.y);
+      const tilt = playerTilt[e.owner] || { x: 0, y: 0 };
+      e.vx = ((e.vx || 0) + tilt.x * MOVE_GRAVITY * step) * damp;
+      e.vy = ((e.vy || 0) + tilt.y * MOVE_GRAVITY * VERTICAL_GRAVITY_MULT * step) * damp;
+
+      const speed = Math.sqrt(e.vx * e.vx + e.vy * e.vy);
+      const maxSpeed = MOVE_MAX_SPEED * step;
+      if (speed > maxSpeed) {
+        e.vx = (e.vx / speed) * maxSpeed;
+        e.vy = (e.vy / speed) * maxSpeed;
+      }
+
+      e.x += e.vx;
+      e.y += e.vy;
+
+      // Characters tilt around freely but never leave their owner's
+      // region: they bounce off its walls instead of crossing over.
+      // (Haters keep roaming the whole torus.)
+      const region = playerRegions[e.owner];
+      if (region !== undefined) {
+        boundToRegion(e, region);
+      } else {
+        e.x = wrapX(e.x);
+        e.y = wrapY(e.y);
+      }
+
+      e.tx = e.x;
+      e.ty = e.y;
     }
 
-    e.tx = e.x;
-    e.ty = e.y;
-
+    // An infected heart still finishes its reveal, so it becomes a black
+    // profile rather than staying a heart forever.
     if (e.isHeart && now - e.born >= HEART_TRANSFORM_MS) {
       e.isHeart = false;
     }
@@ -1103,6 +1114,12 @@ function checkInfections() {
       if (c.type === 'hater' || c.infected) continue;
       if (dist(h.x, h.y, c.x, c.y) <= INFECTION_RADIUS) {
         c.infected = true;
+        // Stop on the exact infection spot and pin the network target so
+        // watching phones see it freeze too.
+        c.vx = 0;
+        c.vy = 0;
+        c.tx = c.x;
+        c.ty = c.y;
       }
     }
   }

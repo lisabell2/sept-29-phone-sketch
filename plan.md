@@ -401,3 +401,8 @@ Scope delivered, per request: all 4 users add + remove sprites in only their own
 - `.github/workflows/static.yml` now names the artifact explicitly (`name: github-pages` on upload, `artifact-name: github-pages` on deploy) and waits 10 seconds between upload and deploy so the artifact is visible to the deploy step's lookup.
 - No sketch change, so `BUILD_ID` stays `v21`.
 
+### Static Infected Profiles (v22)
+- Once a hater touches a profile (`c.infected = true`), that profile is now frozen at the infection spot. `checkInfections()` zeroes its velocity and pins `tx`/`ty` to its current position, and `updateCharacters()` skips all tilt movement, region bouncing and wrapping for infected entities. Watching phones therefore see it stop too, since the host broadcast keeps the same `x`/`y` and target.
+- An infected heart still completes its 2-second heart-to-profile reveal before showing the black tint, so it can't get stuck as a heart.
+- No network/protocol change — `infected` was already broadcast in `hostState()` — so `ROOM_ID` stays `-r5`. `BUILD_ID` → `'v22'`, `index.html` → `sketch.js?v=22`, bumped together.
+
