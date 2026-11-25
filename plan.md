@@ -421,3 +421,7 @@ Scope delivered, per request: all 4 users add + remove sprites in only their own
 - Your own quadrant now reads `Region 1` (or the matching number if you are in another region) in smaller text, tucked against the left side, and keeps its blue chip. `REGION 2`, `REGION 3`, `REGION 4` are back in their original grey top-centre chips, and the HUD's `Your Region: n / 4` is untouched.
 - No network/protocol change, so `ROOM_ID` stays `-r5`. `BUILD_ID` → `'v25'`, `index.html` → `sketch.js?v=25`, bumped together.
 
+### Labels Restored (v26)
+- Reverted the label experiments entirely. `drawRegions()` is back to its original form: the local player's quadrant has the blue `YOUR REGION n` chip and the other three have grey `REGION 2/3/4` chips, all 22px, centred at the top of their quadrant. The HUD's `Your Region: n / 4` is unchanged.
+- Nothing else changed. No network/protocol change, so `ROOM_ID` stays `-r5`. `BUILD_ID` → `'v26'`, `index.html` → `sketch.js?v=26`, bumped together.
+

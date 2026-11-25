@@ -55,7 +55,7 @@ const LOOK_COUNT = 3;
 // A spawned heart reveals as one of LOOK_COUNT + 1 outcomes: one of the
 // positive profiles, or the hater. 0.25 = a 1-in-4 chance.
 const HATER_SPAWN_CHANCE = 0.25;
-const BUILD_ID = 'v25';
+const BUILD_ID = 'v26';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -219,24 +219,18 @@ function drawRegions() {
     }
     rect(b.x, b.y, halfW, halfH);
 
-    // Only your own quadrant's blue chip is special: a small "Region n"
-    // label tucked against the left side. The other three map labels keep
-    // their original top-centre chips exactly as they were.
-    const label = mine ? 'Region ' + (r + 1) : 'REGION ' + (r + 1);
-    const ts = (mine ? 15 : 22) / view.zoom;
+    // Label on a backing chip so it stays readable on the map photo.
+    const label = mine ? 'YOUR REGION ' + (r + 1) : 'REGION ' + (r + 1);
+    const ts = 22 / view.zoom;
     textSize(ts);
-    const tw = textWidth(label) + (mine ? 14 : 26) / view.zoom;
-    const th = ts + (mine ? 8 : 12) / view.zoom;
-    const lx = mine
-      ? b.x + 12 / view.zoom
-      : b.x + halfW / 2 - tw / 2;
-    const ly = mine
-      ? b.y + halfH / 2 - th / 2
-      : b.y + 16 / view.zoom;
+    const tw = textWidth(label) + 26 / view.zoom;
+    const th = ts + 12 / view.zoom;
+    const lx = b.x + halfW / 2 - tw / 2;
+    const ly = b.y + 16 / view.zoom;
 
     noStroke();
     fill(mine ? color(40, 90, 200, 210) : color(0, 0, 0, 130));
-    rect(lx, ly, tw, th, (mine ? 6 : 8) / view.zoom);
+    rect(lx, ly, tw, th, 8 / view.zoom);
     fill(255);
     textAlign(CENTER, CENTER);
     text(label, lx + tw / 2, ly + th / 2);
