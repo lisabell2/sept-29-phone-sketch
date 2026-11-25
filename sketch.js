@@ -55,7 +55,7 @@ const LOOK_COUNT = 3;
 // A spawned heart reveals as one of LOOK_COUNT + 1 outcomes: one of the
 // positive profiles, or the hater. 0.25 = a 1-in-4 chance.
 const HATER_SPAWN_CHANCE = 0.25;
-const BUILD_ID = 'v26';
+const BUILD_ID = 'v27';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -155,7 +155,7 @@ async function loadAssets() {
   }
   heartImg = await tryLoad('nh.png');
   haterImg = await tryLoad('badpfp.png');
-  mapImg = await tryLoad('map.png');
+  mapImg = await tryLoad('newmap.jpg');
   imageMode(CENTER);
 }
 

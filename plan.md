@@ -425,3 +425,8 @@ Scope delivered, per request: all 4 users add + remove sprites in only their own
 - Reverted the label experiments entirely. `drawRegions()` is back to its original form: the local player's quadrant has the blue `YOUR REGION n` chip and the other three have grey `REGION 2/3/4` chips, all 22px, centred at the top of their quadrant. The HUD's `Your Region: n / 4` is unchanged.
 - Nothing else changed. No network/protocol change, so `ROOM_ID` stays `-r5`. `BUILD_ID` → `'v26'`, `index.html` → `sketch.js?v=26`, bumped together.
 
+### New Map Art (v27)
+- Replaced the world map image: `references/map.png` is removed and `references/newmap.jpg` (2048×2048) added. `loadAssets()` now loads `newmap.jpg`; `drawMap()` still stretches it across the same 2400×2400 world, so camera, regions and entities are unchanged.
+- The new map's water samples around `196,230,255`, essentially the same as the existing `MAP_WATER_RGB = [200,232,254]`, so the outside-background colour was left alone.
+- No network/protocol change, so `ROOM_ID` stays `-r5`. `BUILD_ID` → `'v27'`, `index.html` → `sketch.js?v=27`, bumped together.
+
