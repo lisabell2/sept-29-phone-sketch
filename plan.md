@@ -430,3 +430,7 @@ Scope delivered, per request: all 4 users add + remove sprites in only their own
 - The new map's water samples around `196,230,255`, essentially the same as the existing `MAP_WATER_RGB = [200,232,254]`, so the outside-background colour was left alone.
 - No network/protocol change, so `ROOM_ID` stays `-r5`. `BUILD_ID` → `'v27'`, `index.html` → `sketch.js?v=27`, bumped together.
 
+### Wipes Cure Infected Profiles (v28)
+- `clearHaters()` now also clears the `infected` flag on every remaining character. A successful scan (or the optimistic local wipe on a client) removes all haters, returns black profiles to their normal colour, and lets them move with tilt again.
+- Because the host's `STATE` broadcast includes `infected`, all phones converge on the cured state. No protocol change, so `ROOM_ID` stays `-r5`. `BUILD_ID` → `'v28'`, `index.html` → `sketch.js?v=28`, bumped together.
+

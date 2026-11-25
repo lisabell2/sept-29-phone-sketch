@@ -55,7 +55,7 @@ const LOOK_COUNT = 3;
 // A spawned heart reveals as one of LOOK_COUNT + 1 outcomes: one of the
 // positive profiles, or the hater. 0.25 = a 1-in-4 chance.
 const HATER_SPAWN_CHANCE = 0.25;
-const BUILD_ID = 'v27';
+const BUILD_ID = 'v28';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -1209,6 +1209,11 @@ function hostWipeHaters() {
 // Shared local half of a wipe. Safe to run on host or client.
 function clearHaters() {
   entities = entities.filter((e) => e.type !== 'hater');
+  // A clean sweep also cures infected profiles: they lose the black tint
+  // and start moving with tilt again on the next update.
+  for (const e of entities) {
+    if (e.infected) e.infected = false;
+  }
   challenge.active = false;
   challenge.remainingMs = 0;
 }
