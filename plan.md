@@ -416,3 +416,8 @@ Scope delivered, per request: all 4 users add + remove sprites in only their own
 - The HUD keeps its own `Your Region: n / 4` readout, so each player still knows where they are without changing the shared world's labels. The blue border still marks your own quadrant.
 - No network/protocol change, so `ROOM_ID` stays `-r5`. `BUILD_ID` → `'v24'`, `index.html` → `sketch.js?v=24`, bumped together.
 
+### Label Correction (v25)
+- v24 changed all four map labels. That was too much: only the blue chip on your own quadrant should change.
+- Your own quadrant now reads `Region 1` (or the matching number if you are in another region) in smaller text, tucked against the left side, and keeps its blue chip. `REGION 2`, `REGION 3`, `REGION 4` are back in their original grey top-centre chips, and the HUD's `Your Region: n / 4` is untouched.
+- No network/protocol change, so `ROOM_ID` stays `-r5`. `BUILD_ID` → `'v25'`, `index.html` → `sketch.js?v=25`, bumped together.
+
