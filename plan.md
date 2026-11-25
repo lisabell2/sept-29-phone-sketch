@@ -411,3 +411,8 @@ Scope delivered, per request: all 4 users add + remove sprites in only their own
 - A disguised hater is still untouchable while it is a heart, preserving the 1-in-4 reveal surprise. Tapping near a profile now spawns a heart instead of removing it (as long as the tap is in your own region).
 - No protocol change, so `ROOM_ID` stays `-r5`. `BUILD_ID` → `'v23'`, `index.html` → `sketch.js?v=23`, bumped together.
 
+### Uniform Region Labels (v24)
+- The world-space labels drawn on the map used to read `YOUR REGION 1` in blue on the local player's quadrant and `REGION 2/3/4` in grey elsewhere. They now all read `Region 1` … `Region 4` in the same small, white-on-dark chip, tucked against the left side of each quadrant instead of centred at the top.
+- The HUD keeps its own `Your Region: n / 4` readout, so each player still knows where they are without changing the shared world's labels. The blue border still marks your own quadrant.
+- No network/protocol change, so `ROOM_ID` stays `-r5`. `BUILD_ID` → `'v24'`, `index.html` → `sketch.js?v=24`, bumped together.
+

@@ -55,7 +55,7 @@ const LOOK_COUNT = 3;
 // A spawned heart reveals as one of LOOK_COUNT + 1 outcomes: one of the
 // positive profiles, or the hater. 0.25 = a 1-in-4 chance.
 const HATER_SPAWN_CHANCE = 0.25;
-const BUILD_ID = 'v23';
+const BUILD_ID = 'v24';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -219,18 +219,20 @@ function drawRegions() {
     }
     rect(b.x, b.y, halfW, halfH);
 
-    // Label on a backing chip so it stays readable on the map photo.
-    const label = mine ? 'YOUR REGION ' + (r + 1) : 'REGION ' + (r + 1);
-    const ts = 22 / view.zoom;
+    // World-space labels are identical on every phone: Region 1..4, small
+    // and tucked against the left side of each quadrant. "Your Region" is
+    // the HUD's job, so the map never highlights one player's label.
+    const label = 'Region ' + (r + 1);
+    const ts = 15 / view.zoom;
     textSize(ts);
-    const tw = textWidth(label) + 26 / view.zoom;
-    const th = ts + 12 / view.zoom;
-    const lx = b.x + halfW / 2 - tw / 2;
-    const ly = b.y + 16 / view.zoom;
+    const tw = textWidth(label) + 14 / view.zoom;
+    const th = ts + 8 / view.zoom;
+    const lx = b.x + 12 / view.zoom;
+    const ly = b.y + halfH / 2 - th / 2;
 
     noStroke();
-    fill(mine ? color(40, 90, 200, 210) : color(0, 0, 0, 130));
-    rect(lx, ly, tw, th, 8 / view.zoom);
+    fill(0, 0, 0, 140);
+    rect(lx, ly, tw, th, 6 / view.zoom);
     fill(255);
     textAlign(CENTER, CENTER);
     text(label, lx + tw / 2, ly + th / 2);
