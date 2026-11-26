@@ -37,6 +37,10 @@ const NETWORK_SYNC_RATE_MS = 66;
 // A failed join is never final: keep trying to claim the room (or join the
 // current host) on this cadence until a real shared world exists.
 const JOIN_RETRY_MS = 3000;
+// A WebRTC link can die without ever firing 'close' (backgrounded phone,
+// network switch). Clients send VIEW heartbeats every NETWORK_SYNC_RATE_MS,
+// so after this long of silence the host frees the seat for a waiting phone.
+const PEER_TIMEOUT_MS = 6000;
 // A successful scan is resent until the host confirms it. The host may be
 // a background tab whose draw loop (and therefore the periodic state
 // broadcast) is paused, so the wipe is broadcast the moment it happens.
@@ -55,7 +59,7 @@ const LOOK_COUNT = 3;
 // A spawned heart reveals as one of LOOK_COUNT + 1 outcomes: one of the
 // positive profiles, or the hater. 0.25 = a 1-in-4 chance.
 const HATER_SPAWN_CHANCE = 0.25;
-const BUILD_ID = 'v28';
+const BUILD_ID = 'v30';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -117,6 +121,7 @@ let lastScanSentAt = 0;
 const playerRegions = {};
 const playerTilt = {};
 const playerViews = {};
+const playerLastSeen = {};
 
 let challenge = {
   active: false,
@@ -635,20 +640,33 @@ function tryClaimHost() {
 
   peer.on('connection', (conn) => {
     conn.on('open', () => {
-      if (connections.length >= MAX_PLAYERS - 1) {
+      const now = millis();
+      // Dead links may never fire 'close'. Reclaim their seats before
+      // deciding the room is full, so a waiting phone is not stuck in FULL.
+      pruneStaleConnections(now);
+      // A retrying device can arrive twice. Drop its older link so one
+      // phone cannot occupy two of the three client seats.
+      const old = connections.find((c) => c.peer === conn.peer);
+      if (!old && connections.length >= MAX_PLAYERS - 1) {
         conn.send({ type: 'FULL' });
         conn.close();
         return;
       }
+      if (old) connections = connections.filter((c) => c !== old);
       connections.push(conn);
-      const region = freeRegion();
+      // Keep the quadrant this peer already had across a reconnect.
+      const region = playerRegions[conn.peer] !== undefined
+        ? playerRegions[conn.peer]
+        : freeRegion();
       playerRegions[conn.peer] = region;
+      playerLastSeen[conn.peer] = now;
       conn.send({ type: 'WELCOME', region: region, state: hostState() });
       broadcast({ type: 'STATE', state: hostState() });
     });
 
     conn.on('data', (data) => handleHostData(conn, data));
-    conn.on('close', () => removePlayer(conn.peer));
+    conn.on('close', () => removePlayer(conn.peer, conn));
+    conn.on('error', () => removePlayer(conn.peer, conn));
   });
 }
 
@@ -666,6 +684,7 @@ function becomeHost(id) {
     clearMap(playerRegions);
     clearMap(playerViews);
     clearMap(playerTilt);
+    clearMap(playerLastSeen);
     connections = [];
     challenge.nextAt = millis() + FIRST_CHALLENGE_DELAY_MS;
     centerOnRegion(0);
@@ -749,6 +768,7 @@ function goSolo() {
   clearMap(playerRegions);
   clearMap(playerViews);
   clearMap(playerTilt);
+  clearMap(playerLastSeen);
   playerRegions[localId] = 0;
   entities = [];
   if (!viewInitialized) centerOnRegion(0);
@@ -767,12 +787,42 @@ function freeRegion() {
   return 0;
 }
 
-function removePlayer(peerId) {
-  connections = connections.filter((c) => c.peer !== peerId);
-  delete playerRegions[peerId];
-  delete playerViews[peerId];
-  delete playerTilt[peerId];
-  broadcast({ type: 'STATE', state: hostState() });
+function removePlayer(peerId, closedConn) {
+  const before = connections.length;
+  connections = connections.filter((c) =>
+    closedConn ? c !== closedConn : c.peer !== peerId
+  );
+  // A reconnect can leave an older link closing after the newer one is
+  // already live. Only release the quadrant when no link remains.
+  const stillConnected = connections.some((c) => c.peer === peerId);
+  let released = false;
+  if (!stillConnected && peerId in playerRegions) {
+    delete playerRegions[peerId];
+    delete playerViews[peerId];
+    delete playerTilt[peerId];
+    delete playerLastSeen[peerId];
+    released = true;
+  }
+  if (connections.length !== before || released) {
+    broadcast({ type: 'STATE', state: hostState() });
+  }
+}
+
+// Drop seats whose peer has stopped sending VIEW heartbeats. This is the
+// case a plain 'close' event misses: a phone that backgrounded, switched
+// networks, or had its WebRTC link silently die keeps its PeerJS object
+// open, so the host used to hold the quadrant until some *other* player
+// happened to leave. Closing the dead link makes that phone reconnect
+// cleanly when it comes back.
+function pruneStaleConnections(now) {
+  const dead = connections.filter((c) => {
+    const seen = playerLastSeen[c.peer];
+    return !c.open || seen === undefined || now - seen > PEER_TIMEOUT_MS;
+  });
+  for (const conn of dead) {
+    try { conn.close(); } catch (err) {}
+    removePlayer(conn.peer, conn);
+  }
 }
 
 function broadcast(msg) {
@@ -819,6 +869,8 @@ function broadcastStateNow() {
 }
 
 function handleHostData(conn, data) {
+  // Any packet proves this peer is alive, not just VIEW.
+  playerLastSeen[conn.peer] = millis();
   if (!data || !data.type) return;
 
   if (data.type === 'SPAWN') {
@@ -962,11 +1014,13 @@ function applyState(state, snap) {
 
 function networkTick() {
   if (isHost) {
+    const now = millis();
+    pruneStaleConnections(now);
     playerTilt[localId] = readTilt();
     playerViews[localId] = { x: view.x, y: view.y, zoom: view.zoom };
     hostUpdate();
-    if (millis() - lastSyncSent >= NETWORK_SYNC_RATE_MS) {
-      lastSyncSent = millis();
+    if (now - lastSyncSent >= NETWORK_SYNC_RATE_MS) {
+      lastSyncSent = now;
       broadcast({ type: 'STATE', state: hostState() });
     }
   } else {
