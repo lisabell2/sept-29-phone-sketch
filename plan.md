@@ -443,3 +443,8 @@ Scope delivered, per request: all 4 users add + remove sprites in only their own
 - After v30 shipped, every device showed `Connecting… — retrying`, including the intended host. The fixed PeerJS host id `atelier-shared-world-4p-r5-host` was still held by an old/unreachable device from a previous session, so no new device could claim it and all of them kept trying to join a dead host.
 - `ROOM_ID` is bumped to `atelier-shared-world-4p-r6`, which gives a brand-new host id and lets one of the current devices become host. Message types and the 4-quadrant protocol are unchanged. `BUILD_ID` → `'v31'`, `index.html` → `sketch.js?v=31`, bumped together.
 
+### Console Noise Cleaned Up (v32)
+- Camera permission is now requested only from the SCAN COLOR tap. `userSetupComplete()` no longer calls `ensureCamera()` — that callback is not a guaranteed user gesture, so on iOS it could trigger a denied `getUserMedia`. `ensureCamera()` now preflights `getUserMedia()` inside the tap and only calls p5's `createCapture()` once permission is granted, which removes the `NotAllowedError: Permission denied` coming from p5.js line 29151. A denied camera shows `Camera blocked — allow camera access` instead of a console error.
+- p5-phone's one-time warning "Assign touch/mouse handlers before lockGestures()" is suppressed. Our p5 callbacks are declared before `setup()` and all `return false`, so the library's gesture wrapper is applied correctly and only the warning was noise.
+- Neither change affects networking. `BUILD_ID` → `'v32'`, `index.html` → `sketch.js?v=32`, bumped together.
+

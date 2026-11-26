@@ -59,7 +59,7 @@ const LOOK_COUNT = 3;
 // A spawned heart reveals as one of LOOK_COUNT + 1 outcomes: one of the
 // positive profiles, or the hater. 0.25 = a 1-in-4 chance.
 const HATER_SPAWN_CHANCE = 0.25;
-const BUILD_ID = 'v31';
+const BUILD_ID = 'v32';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
@@ -82,6 +82,7 @@ let mapImg;
 let cam;
 let camGfx;
 let cameraRequested = false;
+let cameraPermission = 'unknown';
 
 let entities = [];
 let nextEntityId = 1;
@@ -137,6 +138,10 @@ let scanButton = { x: 0, y: 0, w: 0, h: 0 };
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
+  // Our p5 callbacks are declared in sketch.js before setup runs and all
+  // return false, so p5-phone's one-time "handlers reassigned" warning is
+  // noise here. Suppress only that warning, not the gesture wrapping.
+  window._gestureHandlerAssignWarned = true;
   lockGestures();
   enableSensorTap(SENSOR_PROMPT_TEXT);
   showDesktopQr({ label: 'Scan to open on your phone' });
@@ -148,7 +153,9 @@ function setup() {
 }
 
 function userSetupComplete() {
-  ensureCamera();
+  // Camera is intentionally NOT started here: this callback runs after the
+  // sensor tap, and iOS only grants media permission inside a live gesture.
+  // The SCAN COLOR button requests it instead.
 }
 
 async function loadAssets() {
@@ -1294,10 +1301,28 @@ function updateChallenge(now) {
 
 // ---------- camera challenge ----------
 
-function ensureCamera() {
+async function ensureCamera() {
   if (cameraRequested || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
 
   cameraRequested = true;
+
+  // Ask for permission inside the tap. p5's createCapture() calls
+  // getUserMedia internally and logs a loud NotAllowedError to the console
+  // when access is denied; preflighting here lets us fail quietly and show
+  // our own message instead. A granted permission then makes createCapture
+  // succeed without another prompt.
+  try {
+    const probe = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false,
+    });
+    probe.getTracks().forEach((track) => track.stop());
+    cameraPermission = 'granted';
+  } catch (err) {
+    cameraPermission = 'denied';
+    cameraRequested = false;
+    return;
+  }
 
   try {
     cam = createCapture({ video: { facingMode: { ideal: 'environment' } }, audio: false });
@@ -1430,7 +1455,11 @@ function onScanPressed() {
   const sampled = sampleCameraColor();
 
   if (!sampled) {
-    showMessage(cam ? 'Camera starting — try again' : 'Camera not available');
+    showMessage(
+      cameraPermission === 'denied'
+        ? 'Camera blocked — allow camera access'
+        : (cam ? 'Camera starting — try again' : 'Camera not available')
+    );
     return;
   }
 
