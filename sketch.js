@@ -1,6 +1,6 @@
 // Numbers to tune
 const SENSOR_PROMPT_TEXT = 'Tap to start';
-const ROOM_ID = 'atelier-shared-world-4p-r5';
+const ROOM_ID = 'atelier-shared-world-4p-r6';
 const MAX_PLAYERS = 4;
 const WORLD_WIDTH = 2400;
 const WORLD_HEIGHT = 2400;
@@ -59,7 +59,7 @@ const LOOK_COUNT = 3;
 // A spawned heart reveals as one of LOOK_COUNT + 1 outcomes: one of the
 // positive profiles, or the hater. 0.25 = a 1-in-4 chance.
 const HATER_SPAWN_CHANCE = 0.25;
-const BUILD_ID = 'v30';
+const BUILD_ID = 'v31';
 
 const COLORS = [
   { name: 'red', rgb: [220, 40, 40] },
